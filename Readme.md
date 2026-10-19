@@ -12,3 +12,7 @@
  - always make sure db password is plain loweruppernumber no    special characters as thier reserverd
  - create a database.js
  - use it in app.js
+
+ - Built an Product admin CRUD operation
+
+- Pagination 

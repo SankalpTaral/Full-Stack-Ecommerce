@@ -29,7 +29,34 @@ const createProduct = async (req, res) => {
 // Get all products
 const getAllProducts = async (req, res) => {
   try {
-    const products = await Product.find();
+    const page = parseInt(req.query.page) || 1; // page=2 this 2 comes in string format convert it to number
+
+    let limit = parseInt(req.query.limit) || 10; // if fe doesnt pass the limit like u dont get limit then assume limit as 10
+
+    limit = limit > 50 ? 50 : limit;
+
+    // if page doesnt not exist it is throwing me an empty array
+
+    const totalProducts = await Product.countDocuments(); // this will count the users
+
+    const totalPages = Math.ceil(totalProducts / limit);
+
+    console.log(page, limit);
+
+     // exceeds page limit extra safety check
+            if (page > totalPages) {
+            return res.status(404).json({
+                success: false,
+                message: "Page not found"
+            });
+            }
+
+            const skip =(page -1) * limit
+
+    
+    const products = await Product.find()
+    .skip(skip)
+    .limit(limit)
 
     return res.status(200).json({
       message: "Products fetched successfully",
@@ -183,4 +210,10 @@ const deleteProduct = async (req, res) => {
     });
   }
 };
-export { createProduct, getAllProducts, getProduct, updateProduct , deleteProduct };
+export {
+  createProduct,
+  getAllProducts,
+  getProduct,
+  updateProduct,
+  deleteProduct,
+};
