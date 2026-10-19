@@ -29,23 +29,63 @@ const createProduct = async (req, res) => {
 // Get all products
 const getAllProducts = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1; // page=2 this 2 comes in string format convert it to number
+    const page = req.query.page === undefined ? 1 : Number(req.query.page);
 
-    let limit = parseInt(req.query.limit) || 10; // if fe doesnt pass the limit like u dont get limit then assume limit as 10
+    let limit = req.query.limit === undefined ? 10 : Number(req.query.limit);
+
+    // validation for page and limit it should be postive nothing
+    // nothing else is expected page = 1  valid else page = -1 not valid  page =xyz and all same for limit
+    // page = 1.5 will throw error
+
+    if (
+      !Number.isInteger(page) ||
+      page < 1 ||
+      !Number.isInteger(limit) ||
+      limit < 1
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Page and limit must be positive integers",
+      });
+    }
 
     const { category } = req.query;
 
-    console.log(category)
+    const { search } = req.query;
+
+    const { sort } = req.query;
 
     limit = limit > 50 ? 50 : limit;
 
+    const filter = {};
 
-      const filter = {};
+    if (search) {
+      filter.name = {
+        $regex: search,
+        $options: "i",
+      };
+    }
 
     if (category) {
       filter.category = category;
     }
 
+    let sortOption = {};
+    if (sort) {
+      if (sort === "low_to_high") {
+        sortOption = { price: 1 };
+      } else if (sort === "high_to_low") {
+        sortOption = { price: -1 };
+      }
+      // sort is given in query but with wrong spelling so extra check return
+      else if (sort !== undefined) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid sort value",
+          allowedValues: ["low_to_high", "high_to_low"],
+        });
+      }
+    }
 
     // if page doesnt not exist it is throwing me an empty array
 
@@ -65,12 +105,17 @@ const getAllProducts = async (req, res) => {
 
     const skip = (page - 1) * limit;
 
-  
-
-    const products = await Product.find(filter).skip(skip).limit(limit);
+    const products = await Product.find(filter)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit);
 
     return res.status(200).json({
       message: "Products fetched successfully",
+      page,
+      limit,
+      totalProducts,
+      totalPages,
       products,
     });
   } catch (error) {
