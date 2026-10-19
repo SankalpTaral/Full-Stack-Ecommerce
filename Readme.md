@@ -15,4 +15,5 @@
 
  - Built an Product admin CRUD operation
 
-- Pagination 
+- Pagination Implement 
+- using query only send ? category = products in getAllProducts

@@ -33,30 +33,41 @@ const getAllProducts = async (req, res) => {
 
     let limit = parseInt(req.query.limit) || 10; // if fe doesnt pass the limit like u dont get limit then assume limit as 10
 
+    const { category } = req.query;
+
+    console.log(category)
+
     limit = limit > 50 ? 50 : limit;
+
+
+      const filter = {};
+
+    if (category) {
+      filter.category = category;
+    }
+
 
     // if page doesnt not exist it is throwing me an empty array
 
-    const totalProducts = await Product.countDocuments(); // this will count the users
+    const totalProducts = await Product.countDocuments(filter); // this will count the users
 
     const totalPages = Math.ceil(totalProducts / limit);
 
-    console.log(page, limit);
+    // console.log(page, limit);
 
-     // exceeds page limit extra safety check
-            if (page > totalPages) {
-            return res.status(404).json({
-                success: false,
-                message: "Page not found"
-            });
-            }
+    // exceeds page limit extra safety check
+    if (page > totalPages) {
+      return res.status(404).json({
+        success: false,
+        message: "Page not found",
+      });
+    }
 
-            const skip =(page -1) * limit
+    const skip = (page - 1) * limit;
 
-    
-    const products = await Product.find()
-    .skip(skip)
-    .limit(limit)
+  
+
+    const products = await Product.find(filter).skip(skip).limit(limit);
 
     return res.status(200).json({
       message: "Products fetched successfully",
