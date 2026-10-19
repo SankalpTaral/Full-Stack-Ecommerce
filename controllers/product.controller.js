@@ -78,7 +78,13 @@ const updateProduct = async (req, res) => {
   try {
     // Step 1 : Never trust request body allow specific fields to update
 
-    const allowedUpdates = ["name", "price", "stock", "category" ,"description"];
+    const allowedUpdates = [
+      "name",
+      "price",
+      "stock",
+      "category",
+      "description",
+    ];
 
     // Step 2 : From reqbody extract keys
 
@@ -97,7 +103,7 @@ const updateProduct = async (req, res) => {
       allowedUpdates.includes(field),
     );
 
-    // If any in invalid key comes to update reject it 
+    // If any in invalid key comes to update reject it
     if (!isAllowed) {
       return res.status(400).json({
         message: "Invalid fields provided for update",
@@ -129,7 +135,7 @@ const updateProduct = async (req, res) => {
       });
     }
 
-    //Returned the updated Product as response 
+    //Returned the updated Product as response
 
     return res.status(200).json({
       message: "Product updated successfully",
@@ -142,4 +148,39 @@ const updateProduct = async (req, res) => {
   }
 };
 
-export { createProduct, getAllProducts, getProduct , updateProduct };
+const deleteProduct = async (req, res) => {
+  try {
+    /*
+  * Check if mongo db id user is sending it is correct format or no
+    25 hexadecimal format
+  * then check if product exist or no with that id in the db
+  * If product exist move forward and delete if not return that product not exist in the db
+  * delete product and return response 
+   */
+    const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid Product id ",
+      });
+    }
+
+    const product = await Product.findByIdAndDelete(id);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Product deleted successfully",
+      product,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+export { createProduct, getAllProducts, getProduct, updateProduct , deleteProduct };
