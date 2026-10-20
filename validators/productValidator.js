@@ -26,6 +26,7 @@ const validateProduct = (reqBody) => {
     return null; 
 };
 
+
 export default validateProduct;
 
 
