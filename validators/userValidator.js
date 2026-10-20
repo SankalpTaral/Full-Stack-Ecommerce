@@ -1,6 +1,6 @@
 import validator from "validator";
 
-const validateUser = (reqBody) => {
+export const validateUser = (reqBody) => {
   // Step 1: Check the user fields can send only the required fields
   const allowedFields = ["name", "email", "password"];
 
@@ -56,9 +56,52 @@ const validateUser = (reqBody) => {
   return null; // means all the checks are passed
 };
 
-export default validateUser;
 
-/*
+export const validateUserLogin = (reqBody) => {
+  // Step 1: Validate request body
+  if (
+    !reqBody ||
+    typeof reqBody !== "object" ||
+    Array.isArray(reqBody)
+  ) {
+    return "Invalid request body";
+  }
+
+  // Step 2: Allow only email and password
+  const allowedFields = ["email", "password"];
+  const requestedFields = Object.keys(reqBody);
+
+  const isAllowed = requestedFields.every((field) =>
+    allowedFields.includes(field)
+  );
+
+  if (!isAllowed) {
+    return "Invalid fields provided";
+  }
+
+  // Step 3: Extract fields
+  const { email, password } = reqBody;
+
+  // Step 4: Check email
+  if (typeof email !== "string" || !email.trim()) {
+    return "Email is required";
+  }
+
+  // Step 5: Check password
+  if (typeof password !== "string" || !password) {
+    return "Password is required";
+  }
+
+  // Step 6: Validate email format
+  if (!validator.isEmail(email)) {
+    return "Invalid email";
+  }
+
+  // All validations passed
+  return null;
+};
+
+/*  validateUser 
 1. Allow only the fields required for customer signup:
    name, email, password.
    This prevents users from sending unexpected fields like role: "admin".
