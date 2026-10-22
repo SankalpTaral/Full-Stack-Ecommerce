@@ -1,18 +1,37 @@
 
-import express from 'express'
+import express from "express";
 
-import { createProduct, getAllProducts  , getProduct, updateProduct, deleteProduct} from '../controllers/product.controller.js'
+import {
+  createProduct,
+  updateProduct,
+  deleteProduct,
+} from "../controllers/product.controller.js";
 
+import { userAuth } from "../middleware/userAuth.js";
+import adminAuth from "../middleware/adminAuth.js";
 
-const adminRouter = express.Router()
+const adminRouter = express.Router();
 
-adminRouter.post('/createProduct', createProduct)
+// Admin-only routes
+adminRouter.post(
+  "/createProduct",
+  userAuth,
+  adminAuth,
+  createProduct
+);
 
-adminRouter.get('/getAllProducts', getAllProducts)
+adminRouter.patch(
+  "/updateProduct/:id",
+  userAuth,
+  adminAuth,
+  updateProduct
+);
 
-adminRouter.get('/getProduct/:id' , getProduct)
+adminRouter.delete(
+  "/deleteProduct/:id",
+  userAuth,
+  adminAuth,
+  deleteProduct
+);
 
-adminRouter.patch('/updateProduct/:id' , updateProduct)
-
-adminRouter.delete('/deleteProduct/:id' , deleteProduct)
 export default adminRouter;

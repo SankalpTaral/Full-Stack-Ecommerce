@@ -1,4 +1,5 @@
 import User from "../models/user.js";
+import jwt from "jsonwebtoken";
 import {
   validateUser,
   validateUserLogin,
@@ -17,7 +18,7 @@ export const createUser = async (req, res) => {
     }
     // if i reach here meaning i passed check
 
-    const { name, email, password } = req.body;
+    const { name, email, password  } = req.body;
 
     // Step 2 : Check if user already exists or not in db
 
@@ -39,6 +40,7 @@ export const createUser = async (req, res) => {
       name,
       email,
       password: hashedPassword,
+      role : "user" // even if they send admin they should be made user 
     });
 
     return res.status(201).json({
@@ -86,17 +88,42 @@ export const loginUser = async (req, res) => {
       });
     }
 
-      // Step 4 : return a response that login succesfull
+    // Step 3.1 Generate a jwt token
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
 
-      return res.status(200).json({
-        message : "Logged in Successfull"
-      })
+    // Step 3.2
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 1000,
+    });
 
-    } catch (err) {
+    // Step 4 : return a response that login succesfull
+
+    return res.status(200).json({
+      message: "Logged in Successfull",
+    });
+  } catch (err) {
     return res.status(500).json({
-      message: "Internal server error"
-    })
+      message: "Internal server error",
+    });
   }
+};
+
+
+export const logoutUser = (req,res) =>{
+  res.clearCookie("token" , {
+    httpOnly : true,
+    secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+  })
+
+  return res.status(200).json({
+    message : "Logged out succesfully"
+  })
 }
 
 /*

@@ -68,8 +68,9 @@ export const validateUserLogin = (reqBody) => {
   }
 
   // Step 2: Allow only email and password
-  const allowedFields = ["email", "password"];
+  const allowedFields = ["email","password"];
   const requestedFields = Object.keys(reqBody);
+  console.log(requestedFields);
 
   const isAllowed = requestedFields.every((field) =>
     allowedFields.includes(field)
