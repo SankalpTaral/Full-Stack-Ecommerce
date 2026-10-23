@@ -43,9 +43,8 @@ Think about what should happen now.
 
     const cart = await Cart.findOne({
       userId: req.user._id,
-    })
+    });
 
-   
     // if cart contains document meaning user has a cart already
     // cart is null then meaning that user does not have cart
 
@@ -56,14 +55,13 @@ Think about what should happen now.
         userId: req.user._id,
         items: [
           {
-            productId:productId,
+            productId: productId,
             quantity: 1,
           },
         ],
       });
 
-       await newCart.populate("items.productId", "name price");
-
+      await newCart.populate("items.productId", "name price");
 
       return res.status(201).json({
         success: true,
@@ -80,7 +78,7 @@ Think about what should happen now.
       const existingItem = cart.items.find((item) => {
         return item.productId.toString() === productId.toString();
       });
-      // exisiting item if found = it returns an matching object in items array  not entire document 
+      // exisiting item if found = it returns an matching object in items array  not entire document
 
       // . find returns the exisiting Item {productId : id and the quantity : }
       // if exist go and increase the qty
@@ -96,7 +94,7 @@ Think about what should happen now.
         });
       }
 
-      cart.populate("items.productId","name price");
+      cart.populate("items.productId", "name price");
 
       await cart.save();
     }
@@ -115,4 +113,162 @@ Think about what should happen now.
   }
 };
 
+export const getCartDetails = async (req, res) => {
+  // go the user Id
+  try {
+    const userId = req.user._id;
 
+    const checkUserInCart = await Cart.findOne({
+      userId: req.user._id,
+    }).populate("items.productId", "name price");
+
+    if (!checkUserInCart) {
+      return res.status(404).json({
+        message: "Cart is empty please add products to cart",
+      });
+    }
+
+    //Here i come if user exist in cart documents fetch his cart details and send response
+
+    return res.status(200).json({
+      success: true,
+      cartOwner: req.user.name,
+      items: checkUserInCart.items.map((item) => ({
+        productId: item.productId._id,
+        name: item.productId.name,
+        price: item.productId.price,
+        quantity: item.quantity,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+
+export const updateCart = async (req, res) => {
+  // endpoint /cart/:productId in body user will send  ex : {quantity : 5 }
+
+  const user = req.user;
+
+  console.log(user);
+
+  //Step 1 : Validate the id he is passing in query params is it valid mongodb type or no
+
+  const checkQueryParam = req.params.productId;
+
+  if (!mongoose.isValidObjectId(checkQueryParam)) {
+    return res.status(400).json({
+      message: " Id is not a valid mongoDb id type ur passing in parameters",
+    });
+  }
+
+  //Step 2: Validate the quantity as of now add how many he wants not related to stock
+  // but make sure quantity is a number only no string no 12ab no fraction
+
+  const validateBody = req.body;
+
+  // allow only to send quantity no other words he should send
+
+  const test = Object.keys(validateBody);
+
+  if (test.length !== 1 || test[0] !== "quantity") {
+    return res.status(400).json({
+      message: "invalid body paramter",
+    });
+  }
+
+  // Here i come if user has send one parameter and that parameter is body
+
+  // Now here check the value value should be postive integer not an random number
+
+  const quantityValue = Number(req.body.quantity);
+
+  if (!Number.isInteger(quantityValue) || quantityValue < 1) {
+    return res.status(400).json({
+      message: "Quantity must be a positive integer",
+    });
+  }
+
+  // user has passed valid productId of mongotype body is correct
+
+  // Check wheter the params request productId exist in product collection
+
+  const product = await Product.findById(req.params.productId);
+
+  if (!product) {
+    return res.status(404).json({
+      message: "Product not found",
+    });
+  }
+
+  // Check if user is present in the cart ? if present in the cart check if the productId which he is sending  is present in his userCart if yes then increase the quantity
+
+  // Case 2: user is already owns the cart but productId is missing so go and add the product in user cart
+
+  const checkUserExistInCart = await  Cart.findOne({ userId: req.user._id });
+
+  if (checkUserExistInCart) {
+    const findProductInUserCart = checkUserExistInCart.items.find((item) => {
+      return item.productId.toString() === req.params.productId.toString();
+    });
+
+    if (findProductInUserCart) {
+      findProductInUserCart.quantity += quantityValue;
+
+      
+       await checkUserExistInCart.populate("items.productId" , "name price");
+      await checkUserExistInCart.save();
+
+      return res.status(200).json({
+        message : "product already existed in cart so incremented its quantity by given value in request body",
+        cartOwner : req.user.name,
+        cart : checkUserExistInCart,
+      })
+    } else {
+      // i come here if user owns a cart but product he does not have so go and create a product and set its qty
+   
+      const addProductToUserCart = checkUserExistInCart;
+      // you get the userCart document here go and add it in the items  and set the quantity
+
+      addProductToUserCart.items.push({
+        productId: req.params.productId,
+        quantity: quantityValue,
+      });
+
+      await addProductToUserCart.populate("items.productId" , "name price");
+      // NEED TO SAVE 
+      await addProductToUserCart.save();
+
+      return res.status(201).json({
+        message : "User had cart but did not have the product so created a product and setted its quantity as u provided",
+        cartOwner : req.user.name ,
+        cart :addProductToUserCart
+
+
+      })
+    }
+  } else {
+    // you come in this block if user does not have own a cart only his cart is empty
+    // so create a cart with his userId and add product and set the qty he is sending
+
+    const newCart = await Cart.create({
+      userId : req.user._id,
+      items : [
+       {
+        productId : req.params.productId,
+        quantity : quantityValue
+       }
+      ]
+    })
+    await newCart.populate("items.productId" , "name price");
+
+
+    return res.status(201).json({
+      message : "User did not have an cart so created a cart in that added a product he sent and setted the quantity",
+      cartOwner : req.user.name ,
+      cartDetails : newCart
+    })
+  }
+};
