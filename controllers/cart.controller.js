@@ -272,3 +272,80 @@ export const updateCart = async (req, res) => {
     })
   }
 };
+
+export const deleteProductInCart = async (req,res)=>{
+  try{
+    console.log("yooo");
+
+    if(!mongoose.isValidObjectId(req.params.productId)){
+        return res.status(400).json({
+          message :"invalid product id in query parameters not a valid mongodb id "
+        })
+    }
+
+    const product = await Product.findById(req.params.productId);
+
+    if(!product){
+        return res.status(404).json({
+          message : "Product not found"
+        })
+    }
+
+    const cart = await Cart.findOne({userId:req.user._id})
+
+    console.log(cart);
+
+    if(!cart){
+        return res.status(404).json({
+          message : "User does not have a cart only from where he will delete product own a cart first add item in it then u can delete a product"
+        })
+    }
+
+    const checkProductExistenceInUserCart = cart.items.find((item)=>{
+      return item.productId.toString() === req.params.productId.toString();
+    })
+
+    if(!checkProductExistenceInUserCart){
+      return res.status(404).json({
+          message : "User has a cart but in that cart product id ur giving that is not present so he cannot perfrom delete operation if product does not exist in his cart "
+        })
+    }
+    
+    console.log(checkProductExistenceInUserCart._id);
+
+    
+  
+    const updatedCartItems = cart.items.filter((item) => {
+  return item.productId.toString() !== req.params.productId.toString();
+});
+
+    cart.items = updatedCartItems; // REPLACES THE EXISTING WITH NEW 
+    await cart.populate("items.productId" , "name price");
+    await cart.save();
+
+    return res.status(200).json({
+      success : true,
+      message : "Product deleted from ur Cart successfully",
+      cartOwner : req.user.name,
+      cart  : cart
+    })
+
+    
+
+  }catch(err){
+      return res.status(500).json({
+        message : "Internal server error"
+      })
+  }
+}
+
+/*
+Create an api to delete a product from user cart
+* end point /cart/:productId 
+* Step 1 run userAuth middleware 
+* step 2 : check if productId is valid mongoDb , check such product in our product collection , 
+*           check if user has a cart , if user has cart check if he has a product 
+*           if user does not have a cart then he cannot delete thats quite obvious
+*         if user has a cart then he does not have a product then tell product doesnt exist in the cart to be deleted
+* 
+*/
