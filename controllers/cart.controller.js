@@ -339,6 +339,54 @@ export const deleteProductInCart = async (req,res)=>{
   }
 }
 
+export const clearCart = async (req,res)=>{
+  
+  /*
+  * User is authenticated 
+  * Sanitize 
+  * Check if user has a cart to delete or  no (check user has cart if yes continue else user do not have a cart cannot perfrom deletion before creation)
+  * user has a cart 
+  * okay the find user with the cart and just clear the cart 
+  */
+
+  try{
+  const user = req.user;
+
+  if(req.body !== undefined){
+    return res.status(400).json({
+      message : "Not allowed to send a body "
+    })
+  }
+
+  const checkUserhasCart = await Cart.findOne({userId : user._id});
+
+  if(!checkUserhasCart){
+       return res.status(404).json({
+      message : "user do not have a cart cannot perfrom deletion before creation"
+    })
+  }
+
+  // user has a cart lets clean up the cart and make it empty
+
+  // Design decison we will not delete it from mongodb collection just make the items empty
+  checkUserhasCart.items = [];
+
+  await checkUserhasCart.save();
+
+  return res.status(200).json({
+    success : true,
+    message : "Cart cleared succesfully",
+    cartOwner : req.user.name,
+    cartDetails : checkUserhasCart
+  })
+}catch(err){
+  return res.status(500).json({
+    message : "Internal server error"
+  })
+}
+
+}
+
 /*
 Create an api to delete a product from user cart
 * end point /cart/:productId 
