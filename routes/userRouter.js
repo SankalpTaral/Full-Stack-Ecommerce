@@ -2,7 +2,7 @@ import express from 'express'
 import {userAuth} from '../middleware/userAuth.js';
 import { getProfile } from '../controllers/user.controller.js';
 import { addToCart,clearCart,deleteProductInCart,getCartDetails ,updateCart} from '../controllers/cart.controller.js';
-import { createOrder } from '../controllers/order.controller.js';
+import { createOrder, getAllOrders } from '../controllers/order.controller.js';
 
 
 const userRouter = express.Router();
@@ -21,4 +21,7 @@ userRouter.delete('/cart/:productId',userAuth, deleteProductInCart)
 userRouter.delete('/cart',userAuth,clearCart)
 
 userRouter.post('/order',userAuth , createOrder)
+
+userRouter.get('/getAllOrders',userAuth , getAllOrders)
+
 export default userRouter

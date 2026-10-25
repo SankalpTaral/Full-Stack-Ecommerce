@@ -172,3 +172,146 @@ return res.status(201).json({
 * Step 5 : Clear the cart 
 * Step 6 :Return a response of orderCreation
 */
+
+
+export const getAllOrders = async (req,res)=>{
+
+  try {
+  const user = req.user;
+
+  const id = user._id;
+
+
+
+  const orderDetails = await Order.find({userId :id}).populate("items.productId", "name");
+
+  console.log(orderDetails);
+
+  // find returns an empty array not null
+  if(orderDetails.length === 0){
+      return res.status(404).json({
+        message : "Order details not found no orders!"
+      })
+  }
+
+
+  
+  const data = orderDetails.map((order) => {
+  return {
+    orderId: order._id,
+    userName: user.name,
+    items: order.items.map((item) => {
+      return {
+        productId: item.productId._id,
+        name: item.productId.name,
+        price: item.price,
+        quantity: item.quantity,
+      };
+    }),
+  };
+});
+
+/*
+
+orderDetails = 
+  [
+  yesterday order 
+// index 0 
+  {
+   userId : user ka id 
+   items : [
+      / there can be multiple products here 
+      // product 1 details here
+      {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+      
+      // product 2 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+      // product 3 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+    ] 
+  }
+
+  // index 1 
+
+   {
+   userId : user ka id 
+   items : [
+      / there can be multiple products here 
+      // product 1 details here
+      {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+      
+      // product 2 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+      // product 3 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+    ] 
+  }
+
+
+  ]
+
+*/
+
+ 
+
+
+return res.status(200).json({
+  success: true,
+  user: user.name,
+  orders: data,
+});
+
+}catch(err){
+  return res.status(500).json({
+    message : "Internal server error"
+  })
+}
+}
+/*
+* i get user details from userAuth middleware attach to the req object
+* i fetch user here now 
+* go into orders collection check if user exist in the collection
+* if yes go forward if no no orders found please
+* if yes then print all the orders 
+*  you made a problem findOne({userId : userId}) -> this brings only one order that u made
+* so you need to be carefully my mental model is 
+* like u ordered one from cart -> order collection  one document created
+* you again added to cart and ordered -> one more document created
+* so for every order a new document is created remember it find(userId : userId)
+* so yesterday and today both order you will get 
+* and response structure is bit nested 
+*/
