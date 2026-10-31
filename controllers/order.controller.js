@@ -6,7 +6,6 @@ import { BodyOfOrderValidator } from "../validators/orderValidator.js";
 
 export const createOrder = async (req, res, next) => {
   try {
-
     //Step 0
     const validate = BodyOfOrderValidator(req.body);
 
@@ -171,8 +170,6 @@ export const getAllOrders = async (req, res) => {
       "name",
     );
 
-    console.log(orderDetails);
-
     // find returns an empty array not null
     if (orderDetails.length === 0) {
       return res.status(404).json({
@@ -184,6 +181,11 @@ export const getAllOrders = async (req, res) => {
       return {
         orderId: order._id,
         userName: user.name,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        shippingAddress: order.shippingAddress,
+        createdAt: order.createdAt,
         items: order.items.map((item) => {
           return {
             productId: item.productId._id,
@@ -297,63 +299,100 @@ orderDetails =
    */
 };
 
-export const getOrderById = async (req,res)=>{
-
+export const getOrderById = async (req, res) => {
   try {
-  const user = req.user;
+    const user = req.user;
 
-  const orderId = req.params.orderId;
+    const orderId = req.params.orderId;
 
- if(!mongoose.isValidObjectId(orderId)){
-    return res.status(400).json({
-      message : "Order Id is params is invalid format please provide mongo db id format"
+    if (!mongoose.isValidObjectId(orderId)) {
+      return res.status(400).json({
+        message:
+          "Order Id is params is invalid format please provide mongo db id format",
+      });
+    }
 
-    })
- }
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: user._id,
+    }).populate("items.productId", "name");
 
+    if (!order) {
+      return res.status(404).json({
+        message: "No order details exist with such order id order not found ",
+      });
+    }
 
- const order = await Order.findOne({
-    _id : orderId,
-    userId : user._id,
- }).populate("items.productId" , "name");
+    return res.status(200).json({
+      message: "Order details with that id fetched successfully",
+      owner: user.name,
+      order: order,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
 
-
-
- if(!order){
-    return res.status(404).json({
-      message : "No order details exist with such order id order not found "
-    })
- }
-
-
- return res.status(200).json({
-  message : "Order details with that id fetched successfully",
-  owner : user.name,
-  order : order
- })
-
- 
-
-}catch(err){
-  return res.status(500).json({
-    message  :"Internal server error"
-  })
-}
-
- 
   /*
-  * You get User Id 
-  * my GET order / :orderId 
-  * an important im creating order with cart products so it can be single or mulitple products with a single producId
-  * so validate the params is he sending correct orderId or no
-  * after validating check in order collection with that orderId any orderId exist
-  * if not orderId then tell bad request with that no order exist
-  * if yes send the order details about that orderId which all items and all
-  * 
-  * important security vulnearbility ownership problem happend
-  * anita was logged in any how anita got arjun orderId
-  * she was able to see arjun orderId details that is wrong na
-  * so u should always authenticate that the user sending request his userId and orderId both are correct 
-  * if orderId correct but userId not correct mismatch then ownership problem throw error
-  */
-}
+   * You get User Id
+   * my GET order / :orderId
+   * an important im creating order with cart products so it can be single or mulitple products with a single producId
+   * so validate the params is he sending correct orderId or no
+   * after validating check in order collection with that orderId any orderId exist
+   * if not orderId then tell bad request with that no order exist
+   * if yes send the order details about that orderId which all items and all
+   *
+   * important security vulnearbility ownership problem happend
+   * anita was logged in any how anita got arjun orderId
+   * she was able to see arjun orderId details that is wrong na
+   * so u should always authenticate that the user sending request his userId and orderId both are correct
+   * if orderId correct but userId not correct mismatch then ownership problem throw error
+   */
+};
+
+export const cancelOrderById = async (req, res) => {
+  try {
+    const orderId = req.params.orderId;
+
+    // Step 1: Validate MongoDB ObjectId
+    if (!mongoose.isValidObjectId(orderId)) {
+      return res.status(400).json({
+        message: "Invalid MongoDB ObjectId",
+      });
+    }
+
+    // Step 2: Find order belonging to logged-in user
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: req.user._id,
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        message: "No such order exists",
+      });
+    }
+
+    // Step 3: Check whether cancellation is allowed
+    if (order.status !== "pending") {
+      return res.status(400).json({
+        message: "Order cannot be cancelled",
+      });
+    }
+
+    // Step 4: Update order status
+    order.status = "cancelled";
+    await order.save();
+
+    // Step 5: Success response
+    return res.status(200).json({
+      message: "Order cancelled successfully",
+      order,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};

@@ -2,7 +2,7 @@ import express from 'express'
 import {userAuth} from '../middleware/userAuth.js';
 import { getProfile } from '../controllers/user.controller.js';
 import { addToCart,clearCart,deleteProductInCart,getCartDetails ,updateCart} from '../controllers/cart.controller.js';
-import { createOrder, getAllOrders, getOrderById } from '../controllers/order.controller.js';
+import { cancelOrderById, createOrder, getAllOrders, getOrderById } from '../controllers/order.controller.js';
 
 
 const userRouter = express.Router();
@@ -25,5 +25,7 @@ userRouter.post('/order',userAuth , createOrder)
 userRouter.get('/getAllOrders',userAuth , getAllOrders)
 
 userRouter.get('/order/:orderId', userAuth, getOrderById);
+
+userRouter.patch('/order/:orderId/cancel',userAuth,cancelOrderById)
 
 export default userRouter
