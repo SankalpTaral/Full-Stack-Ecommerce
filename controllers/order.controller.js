@@ -396,3 +396,98 @@ export const cancelOrderById = async (req, res) => {
     });
   }
 };
+
+//Admin can perform this operations
+export const updateOrderStatus = async (req, res) => {
+  try {
+    // end point PATCH /order/:orderId/status body-> {status : confirmed / shipped / delivered}
+    // Step1 : check if user sending the orderId in query params is correct mongoDb format or no
+
+    const orderId = req.params.orderId;
+
+    if (!mongoose.isValidObjectId(orderId)) {
+      return res.status(400).json({
+        message: "Invalid OrderId in params not a mongdb id type",
+      });
+    }
+
+    // Step 2 : Check if orderId exist in the Order Collection
+
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return res.status(404).json({
+        message: "No orders realted with such orderId order not found !",
+      });
+    }
+
+    // Step 3 : Santize the request body
+    //  Check the body should contain either confirmed , shipped , delivered anything else in body will be rejected nothing else can be sent no muliple lines
+    //{status :pending/confirmed/delivered} o extra things make sure admin req.body has only one key
+
+    const body = req.body;
+
+    const key = Object.keys(body);
+    if (key.length != 1) {
+      return res.status(400).json({
+        message: "Invalid Body ",
+      });
+    }
+
+    if (key[0] != "status") {
+      return res.status(400).json({
+        message: "Invalid Body ",
+      });
+    }
+
+    const { status } = req.body;
+
+    // check status fields it should be only allowed to this fields
+
+    const allowedStatus = ["confirmed", "shipped", "delivered"];
+
+    if (!allowedStatus.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid order status",
+      });
+    }
+
+    // checked orderId checked body checkedOrder exist next now here
+    // Step 4 here i come
+
+    const statusInDb = order.status;
+
+    if (statusInDb === "cancelled") {
+      return res.status(400).json({
+        message: "This order is cancelled By user u cannot update it status ",
+      });
+    }
+
+    // CHECK THE FLOW IF PENDING -> CONFIRMED ACCEPTED PENDING-> DELVIERED THEN REJECT
+
+    const statusFlow = ["pending", "confirmed", "shipped", "delivered"];
+
+    const currentIndex = statusFlow.indexOf(statusInDb);
+    const requestedIndex = statusFlow.indexOf(status);
+
+    if (requestedIndex !== currentIndex + 1) {
+      return res.status(400).json({
+        message: "Invalid order status transition",
+      });
+    }
+
+    // change the status and save it
+    order.status = status;
+    await order.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Order status updated successfully",
+      order: order,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message : "Internal server error"
+    })
+  }
+};

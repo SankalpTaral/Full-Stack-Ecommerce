@@ -1,0 +1,3639 @@
+===== FILE: .gitignore =====
+
+node_modules/
+.env
+
+===== FILE: Readme.md =====
+# SETUP Folder
+ -  mkdir Backend 
+ - npm init -y 
+ - npm i express
+ - setup app
+ - create 5 folders
+ - set up an env process.port
+ - npm i dotenv and import it in app
+ - create a cluster in db and connect it to compass
+ - install mongoose 
+ - set up an env connection string 
+ - always make sure db password is plain loweruppernumber no    special characters as thier reserverd
+ - create a database.js
+ - use it in app.js
+
+
+✅ Complete Product CRUD
+✅ Pagination with validation
+✅ Category filtering
+✅ Case-insensitive product search
+✅ Price sorting
+✅ Total products and page metadata
+
+===== FILE: config/database.js =====
+
+import mongoose from 'mongoose';
+
+const connectDB = async () => {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI);
+        console.log('MongoDB connected successfully');
+    } catch (error) {
+        console.error('MongoDB connection failed:', error.message);
+        process.exit(1);
+    }
+};
+
+export default connectDB;
+
+===== FILE: controllers/auth.controller.js =====
+import User from "../models/user.js";
+import jwt from "jsonwebtoken";
+import {
+  validateUser,
+  validateUserLogin,
+} from "../validators/userValidator.js";
+import bcrypt from "bcrypt";
+
+export const createUser = async (req, res) => {
+  // Step 1 : Validate the request Body
+  try {
+    const validateUserRequest = validateUser(req.body);
+
+    if (validateUserRequest) {
+      return res.status(400).json({
+        message: validateUserRequest,
+      });
+    }
+    // if i reach here meaning i passed check
+
+    const { name, email, password  } = req.body;
+
+    // Step 2 : Check if user already exists or not in db
+
+    const existingUser = await User.findOne({ email });
+
+    if (existingUser) {
+      return res.status(409).json({
+        message: "Email already registered",
+      });
+    }
+
+    //Step 3: Hash the password
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Step4 : Create the User and saves  into the database
+
+    const newUser = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      role : "user" // even if they send admin they should be made user 
+    });
+
+    return res.status(201).json({
+      message: "Signed up successfully",
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+
+export const loginUser = async (req, res) => {
+  try {
+    const validateUserRequest = validateUserLogin(req.body);
+
+    if (validateUserRequest) {
+      return res.status(400).json({
+        message: validateUserRequest,
+      });
+    }
+
+    // i come here if all  my login body from user is validated
+
+    // Step 2 : Check if user with those credentials exist or no in the db
+
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+
+    // if user does not exist then return
+    if (!user) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    // Step 3 : Here i come if user exist with that email Check password
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
+    // Step 3.1 Generate a jwt token
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    // Step 3.2
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 1000,
+    });
+
+    // Step 4 : return a response that login succesfull
+
+    return res.status(200).json({
+      message: "Logged in Successfull",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
+
+export const logoutUser = (req,res) =>{
+  res.clearCookie("token" , {
+    httpOnly : true,
+    secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+  })
+
+  return res.status(200).json({
+    message : "Logged out succesfully"
+  })
+}
+
+/*
+Validate request
+
+Find user by email
+
+Compare password with bcrypt
+
+Return login success
+*/
+
+===== FILE: controllers/cart.controller.js =====
+import mongoose from "mongoose";
+import Product from "../models/product.js";
+import Cart from "../models/cart.js";
+
+export const addToCart = async (req, res) => {
+  try {
+    const { productId } = req.body;
+
+    /* Step 1: Validate reqBody
+
+* If user does not send productId in body then it will be treated as undefined -> !undefined !true
+* the productId should be mongoDb valid id not a random id
+* mongoose.Types.ObjectId.isValid(productId) checks it returns true if its an validId
+* so we are reversing it if it returns false  meaning the id is not valid
+* then we convert it to true and make it go in if block and return the response 
+* product id is invalid 
+
+*/
+    if (!productId || !mongoose.Types.ObjectId.isValid(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    // Step 2 Check if productId which is sent exist in ur database of product or no
+
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    /*
+Step 3 — Find the user's cart
+Think about what should happen now.
+- If the user already has a cart, we should use that cart.
+- If the user doesn't have a cart yet, we need to create one.
+*/
+
+    const cart = await Cart.findOne({
+      userId: req.user._id,
+    });
+
+    // if cart contains document meaning user has a cart already
+    // cart is null then meaning that user does not have cart
+
+    // Case 1 : If user does not have cart
+    // create a cart and add the productId which he sent
+    if (!cart) {
+      const newCart = await Cart.create({
+        userId: req.user._id,
+        items: [
+          {
+            productId: productId,
+            quantity: 1,
+          },
+        ],
+      });
+
+      await newCart.populate("items.productId", "name price");
+
+      return res.status(201).json({
+        success: true,
+        cartOwner: req.user.name,
+        message: "Product added to cart successfully",
+        cart: newCart,
+      });
+    }
+
+    // Case 2: If user has a cart already
+    // check in his cart that productId which he is trying to add exist or no in his cart
+    // if it exist in his cart increase quantity it it does not exist in his cart add it set qty as 1
+    else {
+      const existingItem = cart.items.find((item) => {
+        return item.productId.toString() === productId.toString();
+      });
+      // exisiting item if found = it returns an matching object in items array  not entire document
+
+      // . find returns the exisiting Item {productId : id and the quantity : }
+      // if exist go and increase the qty
+      // if existingItem does not find anything means that product does not exist in cart
+      // so create a new product in user cart ka items push it id and quantity
+
+      if (existingItem) {
+        existingItem.quantity += 1;
+      } else {
+        cart.items.push({
+          productId,
+          quantity: 1,
+        });
+      }
+
+      cart.populate("items.productId", "name price");
+
+      await cart.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      cartOwner: req.user.name,
+      message: "Product added to cart successfully",
+      cart: cart,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+export const getCartDetails = async (req, res) => {
+  // go the user Id
+  try {
+    const userId = req.user._id;
+
+    const checkUserInCart = await Cart.findOne({
+      userId: req.user._id,
+    }).populate("items.productId", "name price");
+
+    if (!checkUserInCart) {
+      return res.status(404).json({
+        message: "Cart is empty please add products to cart",
+      });
+    }
+
+    //Here i come if user exist in cart documents fetch his cart details and send response
+
+    return res.status(200).json({
+      success: true,
+      cartOwner: req.user.name,
+      items: checkUserInCart.items.map((item) => ({
+        productId: item.productId._id,
+        name: item.productId.name,
+        price: item.productId.price,
+        quantity: item.quantity,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+
+export const updateCart = async (req, res) => {
+  // endpoint /cart/:productId in body user will send  ex : {quantity : 5 }
+
+  const user = req.user;
+
+  console.log(user);
+
+  //Step 1 : Validate the id he is passing in query params is it valid mongodb type or no
+
+  const checkQueryParam = req.params.productId;
+
+  if (!mongoose.isValidObjectId(checkQueryParam)) {
+    return res.status(400).json({
+      message: " Id is not a valid mongoDb id type ur passing in parameters",
+    });
+  }
+
+  //Step 2: Validate the quantity as of now add how many he wants not related to stock
+  // but make sure quantity is a number only no string no 12ab no fraction
+
+  const validateBody = req.body;
+
+  // allow only to send quantity no other words he should send
+
+  const test = Object.keys(validateBody);
+
+  if (test.length !== 1 || test[0] !== "quantity") {
+    return res.status(400).json({
+      message: "invalid body paramter",
+    });
+  }
+
+  // Here i come if user has send one parameter and that parameter is body
+
+  // Now here check the value value should be postive integer not an random number
+
+  const quantityValue = Number(req.body.quantity);
+
+  if (!Number.isInteger(quantityValue) || quantityValue < 1) {
+    return res.status(400).json({
+      message: "Quantity must be a positive integer",
+    });
+  }
+
+  // user has passed valid productId of mongotype body is correct
+
+  // Check wheter the params request productId exist in product collection
+
+  const product = await Product.findById(req.params.productId);
+
+  if (!product) {
+    return res.status(404).json({
+      message: "Product not found",
+    });
+  }
+
+  // Check if user is present in the cart ? if present in the cart check if the productId which he is sending  is present in his userCart if yes then increase the quantity
+
+  // Case 2: user is already owns the cart but productId is missing so go and add the product in user cart
+
+  const checkUserExistInCart = await  Cart.findOne({ userId: req.user._id });
+
+  if (checkUserExistInCart) {
+    const findProductInUserCart = checkUserExistInCart.items.find((item) => {
+      return item.productId.toString() === req.params.productId.toString();
+    });
+
+    if (findProductInUserCart) {
+      findProductInUserCart.quantity += quantityValue;
+
+      
+       await checkUserExistInCart.populate("items.productId" , "name price");
+      await checkUserExistInCart.save();
+
+      return res.status(200).json({
+        message : "product already existed in cart so incremented its quantity by given value in request body",
+        cartOwner : req.user.name,
+        cart : checkUserExistInCart,
+      })
+    } else {
+      // i come here if user owns a cart but product he does not have so go and create a product and set its qty
+   
+      const addProductToUserCart = checkUserExistInCart;
+      // you get the userCart document here go and add it in the items  and set the quantity
+
+      addProductToUserCart.items.push({
+        productId: req.params.productId,
+        quantity: quantityValue,
+      });
+
+      await addProductToUserCart.populate("items.productId" , "name price");
+      // NEED TO SAVE 
+      await addProductToUserCart.save();
+
+      return res.status(201).json({
+        message : "User had cart but did not have the product so created a product and setted its quantity as u provided",
+        cartOwner : req.user.name ,
+        cart :addProductToUserCart
+
+
+      })
+    }
+  } else {
+    // you come in this block if user does not have own a cart only his cart is empty
+    // so create a cart with his userId and add product and set the qty he is sending
+
+    const newCart = await Cart.create({
+      userId : req.user._id,
+      items : [
+       {
+        productId : req.params.productId,
+        quantity : quantityValue
+       }
+      ]
+    })
+    await newCart.populate("items.productId" , "name price");
+
+
+    return res.status(201).json({
+      message : "User did not have an cart so created a cart in that added a product he sent and setted the quantity",
+      cartOwner : req.user.name ,
+      cartDetails : newCart
+    })
+  }
+};
+
+export const deleteProductInCart = async (req,res)=>{
+  try{
+    console.log("yooo");
+
+    if(!mongoose.isValidObjectId(req.params.productId)){
+        return res.status(400).json({
+          message :"invalid product id in query parameters not a valid mongodb id "
+        })
+    }
+
+    const product = await Product.findById(req.params.productId);
+
+    if(!product){
+        return res.status(404).json({
+          message : "Product not found"
+        })
+    }
+
+    const cart = await Cart.findOne({userId:req.user._id})
+
+    console.log(cart);
+
+    if(!cart){
+        return res.status(404).json({
+          message : "User does not have a cart only from where he will delete product own a cart first add item in it then u can delete a product"
+        })
+    }
+
+    const checkProductExistenceInUserCart = cart.items.find((item)=>{
+      return item.productId.toString() === req.params.productId.toString();
+    })
+
+    if(!checkProductExistenceInUserCart){
+      return res.status(404).json({
+          message : "User has a cart but in that cart product id ur giving that is not present so he cannot perfrom delete operation if product does not exist in his cart "
+        })
+    }
+    
+    console.log(checkProductExistenceInUserCart._id);
+
+    
+  
+    const updatedCartItems = cart.items.filter((item) => {
+  return item.productId.toString() !== req.params.productId.toString();
+});
+
+    cart.items = updatedCartItems; // REPLACES THE EXISTING WITH NEW 
+    await cart.populate("items.productId" , "name price");
+    await cart.save();
+
+    return res.status(200).json({
+      success : true,
+      message : "Product deleted from ur Cart successfully",
+      cartOwner : req.user.name,
+      cart  : cart
+    })
+
+    
+
+  }catch(err){
+      return res.status(500).json({
+        message : "Internal server error"
+      })
+  }
+}
+
+export const clearCart = async (req,res)=>{
+  
+  /*
+  * User is authenticated 
+  * Sanitize 
+  * Check if user has a cart to delete or  no (check user has cart if yes continue else user do not have a cart cannot perfrom deletion before creation)
+  * user has a cart 
+  * okay the find user with the cart and just clear the cart 
+  */
+
+  try{
+  const user = req.user;
+
+  if(req.body !== undefined){
+    return res.status(400).json({
+      message : "Not allowed to send a body "
+    })
+  }
+
+  const checkUserhasCart = await Cart.findOne({userId : user._id});
+
+  if(!checkUserhasCart){
+       return res.status(404).json({
+      message : "user do not have a cart cannot perfrom deletion before creation"
+    })
+  }
+
+  // user has a cart lets clean up the cart and make it empty
+
+  // Design decison we will not delete it from mongodb collection just make the items empty
+  checkUserhasCart.items = [];
+
+  await checkUserhasCart.save();
+
+  return res.status(200).json({
+    success : true,
+    message : "Cart cleared succesfully",
+    cartOwner : req.user.name,
+    cartDetails : checkUserhasCart
+  })
+}catch(err){
+  return res.status(500).json({
+    message : "Internal server error"
+  })
+}
+
+}
+
+/*
+Create an api to delete a product from user cart
+* end point /cart/:productId 
+* Step 1 run userAuth middleware 
+* step 2 : check if productId is valid mongoDb , check such product in our product collection , 
+*           check if user has a cart , if user has cart check if he has a product 
+*           if user does not have a cart then he cannot delete thats quite obvious
+*         if user has a cart then he does not have a product then tell product doesnt exist in the cart to be deleted
+* 
+*/
+
+===== FILE: controllers/order.controller.js =====
+import mongoose from "mongoose";
+import Cart from "../models/cart.js";
+import Order from "../models/order.js";
+import Product from "../models/product.js";
+import { BodyOfOrderValidator } from "../validators/orderValidator.js";
+
+export const createOrder = async (req, res, next) => {
+  try {
+    //Step 0
+    const validate = BodyOfOrderValidator(req.body);
+
+    if (validate) {
+      return res.status(400).json({
+        success: false,
+        message: validate,
+      });
+    }
+    console.log("After step 1");
+
+    // Step 1
+    const userId = req.user._id;
+
+    const cart = await Cart.findOne({ userId: userId });
+
+    // Check user has a cart or no
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "Cart not found. Please add products to your cart before ordering.",
+      });
+    }
+
+    // Check if user has a product in his cart or no
+
+    if (cart.items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cart  found. Please add products to your cart before ordering.",
+      });
+    }
+
+    // i come here if user has a cart and then there are products in cart
+
+    //Step 2:
+
+    // fetch all productId in an array there can be mulitple so using array
+    const allProductsId = cart.items.map((items) => {
+      return items.productId;
+    });
+
+    // check those allProductId exist in the product collection all should exist
+
+    // design decision if user has 3 products 2 exist 1 does not then fail entire cart order
+
+    // checks the product id and fetches all matching
+
+    // if none matches allProducts =[] if one matches allProducts = [{document 1 with product}]
+    const allProducts = await Product.find({
+      _id: { $in: allProductsId },
+    });
+
+    // SO make sure allProducts exists
+
+    if (allProducts.length !== cart.items.length) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "One or more products in your cart no longer exist. Please update your cart.",
+      });
+    }
+
+    // validate qty logic
+    for (const item of cart.items) {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product quantity in cart.",
+        });
+      }
+    }
+
+    // orderItems you have an array of objects of each product with latest price
+
+    const orderItems = cart.items.map((item) => {
+      const product = allProducts.find(
+        (product) => product._id.toString() === item.productId.toString(),
+      );
+
+      return {
+        productId: product._id,
+        price: product.price,
+        quantity: item.quantity,
+      };
+    });
+
+    // Step 3 Calculate total Amount
+
+    const calculateAmount = orderItems.reduce((acc, item) => {
+      return acc + item.price * item.quantity;
+    }, 0);
+
+    // Step 4: Create the order
+    const order = await Order.create({
+      userId,
+      items: orderItems,
+      totalAmount: calculateAmount,
+      shippingAddress: req.body.shippingAddress,
+    });
+
+    // Step 6: Clear the cart only after order creation succeeds
+    cart.items = [];
+    await cart.save();
+
+    // Step 7: Return the response
+    return res.status(201).json({
+      success: true,
+      message: "Order placed successfully",
+      data: {
+        orderId: order._id,
+        items: order.items,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        shippingAddress: order.shippingAddress,
+        createdAt: order.createdAt,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+
+  /*
+* If user is authenticated you will come to this createOrder fn
+* Step 0 : validate the requestBody hah shipping address
+* Step 1 
+        * Fetch the userId from req.user._id
+        * check if the user owns the cart or no 
+                * if no then return please  create cart before ordering empty cart  with no products cannot be ordered
+                * if user has a cart but products are empty then please add products to cart
+                * if user has a cart and products in it go to step2
+* Step 2 : Validate the products in the cart
+        *   Does every product in the cart still exist in the product collection 
+        *  Validate the quantity in user cart 
+        * Get the current price from the database 
+            * Why because is you added to cart yesterday price of an item was 999
+            * you are buying it today price hiked 999 so read the current price
+            * ❌ Don't blindly trust an old cart price.
+            *  Read the product's current price from MongoDB.  
+* Step 3 : Calculate total Amount
+* Step 4: Create a order document decide what data goes inside it 
+            * Created now save it
+
+* Step 5 : Clear the cart 
+* Step 6 :Return a response of orderCreation
+*/
+};
+
+export const getAllOrders = async (req, res) => {
+  try {
+    const user = req.user;
+
+    const id = user._id;
+
+    const orderDetails = await Order.find({ userId: id }).populate(
+      "items.productId",
+      "name",
+    );
+
+    // find returns an empty array not null
+    if (orderDetails.length === 0) {
+      return res.status(404).json({
+        message: "Order details not found no orders!",
+      });
+    }
+
+    const data = orderDetails.map((order) => {
+      return {
+        orderId: order._id,
+        userName: user.name,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        shippingAddress: order.shippingAddress,
+        createdAt: order.createdAt,
+        items: order.items.map((item) => {
+          return {
+            productId: item.productId._id,
+            name: item.productId.name,
+            price: item.price,
+            quantity: item.quantity,
+          };
+        }),
+      };
+    });
+
+    /*
+
+orderDetails = 
+  [
+  yesterday order 
+// index 0 
+  {
+   userId : user ka id 
+   items : [
+      / there can be multiple products here 
+      // product 1 details here
+      {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+      
+      // product 2 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+      // product 3 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+    ] 
+  }
+
+  // index 1 
+
+   {
+   userId : user ka id 
+   items : [
+      / there can be multiple products here 
+      // product 1 details here
+      {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+      
+      // product 2 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+      // product 3 
+       {
+        productId : 
+          name : 
+          price : 
+          qty: 
+      }
+
+    ] 
+  }
+
+
+  ]
+
+*/
+
+    return res.status(200).json({
+      success: true,
+      user: user.name,
+      orders: data,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+
+  /*
+   * i get user details from userAuth middleware attach to the req object
+   * i fetch user here now
+   * go into orders collection check if user exist in the collection
+   * if yes go forward if no no orders found please
+   * if yes then print all the orders
+   *  you made a problem findOne({userId : userId}) -> this brings only one order that u made
+   * so you need to be carefully my mental model is
+   * like u ordered one from cart -> order collection  one document created
+   * you again added to cart and ordered -> one more document created
+   * so for every order a new document is created remember it find(userId : userId)
+   * so yesterday and today both order you will get
+   * and response structure is bit nested
+   */
+};
+
+export const getOrderById = async (req, res) => {
+  try {
+    const user = req.user;
+
+    const orderId = req.params.orderId;
+
+    if (!mongoose.isValidObjectId(orderId)) {
+      return res.status(400).json({
+        message:
+          "Order Id is params is invalid format please provide mongo db id format",
+      });
+    }
+
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: user._id,
+    }).populate("items.productId", "name");
+
+    if (!order) {
+      return res.status(404).json({
+        message: "No order details exist with such order id order not found ",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Order details with that id fetched successfully",
+      owner: user.name,
+      order: order,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+
+  /*
+   * You get User Id
+   * my GET order / :orderId
+   * an important im creating order with cart products so it can be single or mulitple products with a single producId
+   * so validate the params is he sending correct orderId or no
+   * after validating check in order collection with that orderId any orderId exist
+   * if not orderId then tell bad request with that no order exist
+   * if yes send the order details about that orderId which all items and all
+   *
+   * important security vulnearbility ownership problem happend
+   * anita was logged in any how anita got arjun orderId
+   * she was able to see arjun orderId details that is wrong na
+   * so u should always authenticate that the user sending request his userId and orderId both are correct
+   * if orderId correct but userId not correct mismatch then ownership problem throw error
+   */
+};
+
+export const cancelOrderById = async (req, res) => {
+  try {
+    const orderId = req.params.orderId;
+
+    // Step 1: Validate MongoDB ObjectId
+    if (!mongoose.isValidObjectId(orderId)) {
+      return res.status(400).json({
+        message: "Invalid MongoDB ObjectId",
+      });
+    }
+
+    // Step 2: Find order belonging to logged-in user
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: req.user._id,
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        message: "No such order exists",
+      });
+    }
+
+    // Step 3: Check whether cancellation is allowed
+    if (order.status !== "pending") {
+      return res.status(400).json({
+        message: "Order cannot be cancelled",
+      });
+    }
+
+    // Step 4: Update order status
+    order.status = "cancelled";
+    await order.save();
+
+    // Step 5: Success response
+    return res.status(200).json({
+      message: "Order cancelled successfully",
+      order,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+
+
+//Admin can perform this operations
+export const updateOrderStatus = async (req,res) =>{
+
+  // end point PATCH /order/:orderId/status body-> {status : confirmed / shipped / delivered}
+  // Step1 : check if user sending the orderId in query params is correct mongoDb format or no
+
+  const orderId = req.params.orderId;
+
+  if(!mongoose.isValidObjectId(orderId)){
+    return res.status(400).json({
+      message : "Invalid OrderId in params not a mongdb id type"
+    })
+  }
+
+
+
+  // Step 2 : Check if orderId exist in the Order Collection 
+
+  const order = await Order.findById(orderId);
+
+  if(!order){
+    return res.status(404).json({
+      message : "No orders realted with such orderId order not found !"
+    })
+  }
+
+  // Step 3 : Santize the request body
+  //  Check the body should contain either confirmed , shipped , delivered anything else in body will be rejected nothing else can be sent no muliple lines
+  //{status :pending/confirmed/delivered} o extra things make sure admin req.body has only one key
+
+  const body = req.body;
+
+  const key = Object.keys(body)
+  if(key.length!=1){
+    return res.status(400).json({
+      message : "Invalid Body "
+    })
+  }
+  
+  if(key[0]!='status'){
+      return res.status(400).json({
+      message : "Invalid Body "
+    }) 
+  }
+
+
+ const {status} = req.body;
+
+ // check status fields it should be only allowed to this fields
+
+
+ const allowedStatus = ['confirmed' ,'shipped' , 'delivered']
+
+
+
+if (!allowedStatus.includes(status)) {
+    return res.status(400).json({
+        message: "Invalid order status"
+    });
+}
+
+
+// checked orderId checked body checkedOrder exist next now here 
+// Step 4 here i come
+
+  const statusInDb =  order.status;
+
+  if(statusInDb === 'cancelled'){
+    return res.status(400).json({
+      message : "This order is cancelled By user u cannot update it status "
+    })
+  }
+
+  // CHECK THE FLOW IF PENDING -> CONFIRMED ACCEPTED PENDING-> DELVIERED THEN REJECT
+
+
+  const statusFlow = [
+  "pending",
+  "confirmed",
+  "shipped",
+  "delivered"
+];
+
+const currentIndex = statusFlow.indexOf(statusInDb);
+const requestedIndex = statusFlow.indexOf(status);
+
+if (requestedIndex !== currentIndex + 1) {
+  return res.status(400).json({
+    message: "Invalid order status transition"
+  });
+}
+
+
+// change the status and save it 
+order.status = status;
+await order.save();
+
+
+
+return res.status(200).json({
+    success: true,
+    message: "Order status updated successfully",
+    order: order
+});
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+}
+
+===== FILE: controllers/product.controller.js =====
+import mongoose from "mongoose";
+import Product from "../models/product.js";
+import {
+  validateProductUpdate,
+  validateProduct,
+} from "../validators/productValidator.js";
+
+// Create a product
+const createProduct = async (req, res) => {
+  const { name, price, stock, category, description, image } = req.body;
+  try {
+    const error = validateProduct(req.body);
+
+    if (error) {
+      return res.status(400).json({
+        message: error,
+      });
+    }
+    const productData = {
+      name,
+      price,
+      stock,
+      category,
+      description,
+      ...(image !== undefined && { image }),
+    };
+
+    const product = await Product.create(productData);
+
+    return res.status(201).json({
+      message: "Product created successfully",
+      product,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
+// Get all products
+
+
+const getAllProducts = async (req, res) => {
+  try {
+    // ==========================================
+    // 1. NORMALIZE QUERY PARAMETER NAMES & VALUES
+    // ==========================================
+
+
+    console.log("req.query:", req.query);
+
+    const normalizedQuery = {};
+
+    for (const [key, value] of Object.entries(req.query)) {
+      // Convert parameter names to lowercase.
+      // Example: Category -> category
+      const normalizedKey = key.toLowerCase();
+
+        console.log("key:", key);
+  console.log("value:", value);
+  console.log("type:", typeof value);
+
+      // Prevent duplicate parameters after normalization.
+      // Example: ?category=Books&Category=Electronics
+      
+      if (Object.hasOwn(normalizedQuery, normalizedKey)) {
+  return res.status(400).json({
+    success: false,
+    message: "Duplicate query parameters",
+  });
+}
+      // Trim string values and lowercase category/sort values.
+  
+      console.log(typeof(value));
+      if (typeof value === "string") {
+  const trimmedValue = value.trim();
+
+  if (normalizedKey === "category" || normalizedKey === "sort") {
+    normalizedQuery[normalizedKey] = trimmedValue.toLowerCase();
+  } else {
+    normalizedQuery[normalizedKey] = trimmedValue;
+  }
+} 
+else {
+  normalizedQuery[normalizedKey] = value;
+}
+    }
+ 
+
+   
+    // ==========================================
+    // 2. ALLOW ONLY APPROVED QUERY PARAMETERS
+    // ==========================================
+
+    const allowedQueryParams = [
+      "page",
+      "limit",
+      "category",
+      "search",
+      "sort",
+    ];
+
+    const hasInvalidParams = Object.keys(normalizedQuery).some(
+      (param) => !allowedQueryParams.includes(param)
+    );
+
+    if (hasInvalidParams) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid query parameters",
+      });
+    }
+
+    // ==========================================
+    // 3. EXTRACT & VALIDATE PAGINATION
+    // ==========================================
+
+    // Defaults: page 1, 10 products per page.
+    const page =
+      normalizedQuery.page === undefined
+        ? 1
+        : Number(normalizedQuery.page);
+
+    const requestedLimit =
+      normalizedQuery.limit === undefined
+        ? 10
+        : Number(normalizedQuery.limit);
+
+    // Page and limit must be positive integers.
+    // Reject values such as -1, 1.5, "abc", or 0.
+    if (
+      (normalizedQuery.page !== undefined &&
+        (typeof normalizedQuery.page !== "string" ||
+          !/^\d+$/.test(normalizedQuery.page))) ||
+      (normalizedQuery.limit !== undefined &&
+        (typeof normalizedQuery.limit !== "string" ||
+          !/^\d+$/.test(normalizedQuery.limit))) ||
+      !Number.isSafeInteger(page) ||
+      page < 1 ||
+      !Number.isSafeInteger(requestedLimit) ||
+      requestedLimit < 1
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Page and limit must be positive integers",
+      });
+    }
+
+    // Prevent clients from requesting excessively large pages.
+    const limit = Math.min(requestedLimit, 50);
+
+    if (!Number.isSafeInteger((page - 1) * limit)) {
+      return res.status(400).json({
+        success: false,
+        message: "Page is too large",
+      });
+    }
+
+    // ==========================================
+    // 4. EXTRACT & VALIDATE FILTER PARAMETERS
+    // ==========================================
+
+    const { category, search, sort } = normalizedQuery;
+
+    // Reject non-string category values.
+    if (
+      category !== undefined &&
+      typeof category !== "string"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Category must be a string",
+      });
+    }
+
+    // Reject non-string search values.
+    if (
+      search !== undefined &&
+      typeof search !== "string"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Search must be a string",
+      });
+    }
+
+    // Reject empty values after trimming.
+    if (category !== undefined && category.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Category cannot be empty",
+      });
+    }
+
+    if (search !== undefined && search.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Search cannot be empty",
+      });
+    }
+
+    // ==========================================
+    // 5. ESCAPE REGEX SPECIAL CHARACTERS
+    // ==========================================
+
+    // Treat characters such as .* and + literally,
+    // rather than allowing them to change the search pattern.
+    const escapeRegex = (value) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // ==========================================
+    // 6. BUILD THE MONGODB FILTER
+    // ==========================================
+
+    const filter = {};
+
+    // Search product names without case sensitivity.
+    if (search !== undefined) {
+      filter.name = {
+        $regex: escapeRegex(search), // C++ if u type in regex + has  diff meaning so to avoid that we use escape search
+        // it treates + as normal character doesnt trigger regex pattern + 
+        $options: "i", // ignore letter casing for matching name in the db
+      };
+    }
+
+    // Match the entire category, ignoring capitalization.
+    // Example: electronics matches Electronics and ELECTRONICS.
+    if (category !== undefined) {
+      filter.category = {
+        $regex: `^${escapeRegex(category)}$`,
+        $options: "i",
+      };
+    }
+
+    // ==========================================
+    // 7. VALIDATE & BUILD SORT OPTIONS
+    // ==========================================
+
+    let sortOption = {};
+
+    if (sort !== undefined && sort !== "") {
+      if (sort === "low_to_high") {
+        // Lowest price first.
+        sortOption = { price: 1 };
+      } else if (sort === "high_to_low") {
+        // Highest price first.
+        sortOption = { price: -1 };
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid sort value",
+          allowedValues: ["low_to_high", "high_to_low"],
+        });
+      }
+    }
+
+    // ==========================================
+    // 8. COUNT MATCHING PRODUCTS
+    // ==========================================
+
+    // Count only products matching the selected filters.
+    const totalProducts = await Product.countDocuments(filter);
+
+    const totalPages = Math.ceil(totalProducts / limit);
+
+    // If products exist but the requested page exceeds
+    // the available pages, return 404.
+    // If there are zero products, return an empty list instead.
+    if (totalProducts > 0 && page > totalPages) {
+      return res.status(404).json({
+        success: false,
+        message: "Page not found",
+      });
+    }
+
+    // ==========================================
+    // 9. FETCH PRODUCTS
+    // ==========================================
+
+    // Example: page 1 with limit 10 -> skip 0.
+    //          page 2 with limit 10 -> skip 10.
+    const skip = (page - 1) * limit;
+
+    const products = await Product.find(filter)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit);
+
+    // ==========================================
+    // 10. SEND SUCCESS RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Products fetched successfully",
+      page,
+      limit,
+      totalProducts,
+      totalPages,
+      products,
+    });
+  } catch (error) {
+    // Log the detailed error for development/debugging.
+    // Do not expose internal database errors to API clients.
+    console.error("Get all products error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+// Get a single product
+const getProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid product ID",
+      });
+    }
+
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Product fetched successfully",
+      product,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
+// Update a single product partially not replace it
+
+const updateProduct = async (req, res) => {
+  try {
+    // Step 1 : Never trust request body allow specific fields to update
+
+    console.log("Inside update product");
+
+    const validateProductBody = validateProductUpdate(req.body);
+
+    if (validateProductBody) {
+      return res.status(400).json({
+        message: validateProductBody,
+      });
+    }
+
+    // Check if product with that id exist or not
+
+    const { id } = req.params;
+
+    console.log(id);
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid product ID",
+      });
+    }
+
+    // image related check
+
+    if (req.body.image !== undefined) {
+      const { url, publicId } = req.body.image;
+
+      if (
+        !url ||
+        typeof url !== "string" ||
+        !publicId ||
+        typeof publicId !== "string"
+      ) {
+        return res.status(400).json({
+          message: "Image must contain a valid url and publicId",
+        });
+      }
+    }
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      id, // find to find on collection
+      req.body, // fields to update
+      {
+        new: true, // returns update document
+        runValidators: true, // runs validators for new fields
+      },
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({
+        message: "Product with that id does not exist || Product Not Found",
+      });
+    }
+
+    console.log(updatedProduct);
+
+    //Returned the updated Product as response
+
+    return res.status(200).json({
+      message: "Product updated successfully",
+      product: updatedProduct,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
+const deleteProduct = async (req, res) => {
+  try {
+    /*
+  * Check if mongo db id user is sending it is correct format or no
+    25 hexadecimal format
+  * then check if product exist or no with that id in the db
+  * If product exist move forward and delete if not return that product not exist in the db
+  * delete product and return response 
+   */
+    const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid Product id ",
+      });
+    }
+
+    const product = await Product.findByIdAndDelete(id);
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Product not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Product deleted successfully",
+      product,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+export {
+  createProduct,
+  getAllProducts,
+  getProduct,
+  updateProduct,
+  deleteProduct,
+};
+
+===== FILE: controllers/user.controller.js =====
+
+export const getProfile = async (req, res) => {
+  return res.status(200).json({
+    message: "Profile fetched successfully",
+    user: req.user,
+  });
+};
+
+===== FILE: middleware/adminAuth.js =====
+
+const adminAuth = (req,res,next) =>{
+
+    console.log("admin auth");
+
+    const user = req.user;
+    if(user.role !=="admin"){
+        return res.status(403).json({
+        message : "Authenticated But ur not allowed for permissons only admin are allowed"
+        })
+    }
+    // here i come here my role is admin
+
+    req.user = user
+   return  next();
+
+}
+
+export default adminAuth;
+
+===== FILE: middleware/userAuth.js =====
+
+import jwt from "jsonwebtoken";
+import User from "../models/user.js";
+
+export const userAuth = async (req, res, next) => {
+
+  console.log("User Auth");
+  // Step 1: Check whether the browser sent the authentication cookie
+  const { token } = req.cookies ?? {};
+
+  if (!token) {
+    return res.status(401).json({
+      message: "Please login first",
+    });
+  }
+
+  // Step 2: Verify the JWT separately
+  // If the token is invalid, malformed, or expired, return 401
+  let decoded;
+
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({
+      message: "Invalid or expired token",
+    });
+  }
+
+  // Step 3: Extract the user ID from the verified JWT payload
+  // Your login controller creates the token using { id: user._id }
+  const { id } = decoded;
+
+  // Step 4: Find the user in MongoDB
+  // Database errors should not be treated as invalid-token errors
+  try {
+    const user = await User.findById(id).select("-password");
+
+    // Step 5: If the user no longer exists, reject the request
+    if (!user) {
+      return res.status(401).json({
+        message: "User not found",
+      });
+    }
+
+    // Step 6: Attach the authenticated user to the request
+    // Later middleware and controllers can access req.user
+    req.user = user;
+
+    // Step 7: Continue to the next middleware or route handler
+    return next();
+  } catch (err) {
+    // Unexpected database or server error
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
+
+
+/*
+
+* Every knot u say ill be watching you 
+* thats how you belong to me
+* thats how u write 
+*/
+
+===== FILE: models/cart.js =====
+import mongoose, { Schema } from "mongoose";
+
+const cartSchema = new Schema({
+  userId: {
+    type: Schema.Types.ObjectId,
+    ref: "User",
+    required: true,
+    unique: true,
+  },
+
+  items: [
+    {
+      productId: {
+        type: Schema.Types.ObjectId,
+        ref: "Product",
+        required: true,
+      },
+
+      quantity: {
+        type: Number,
+        required: true,
+        min: 1,
+        default: 1,
+      },
+    },
+  ],
+});
+
+const Cart = mongoose.model("Cart", cartSchema);
+
+export default Cart;
+
+===== FILE: models/order.js =====
+import mongoose from "mongoose";
+
+import { Schema } from "mongoose";
+import Product from "./product.js";
+import User from "./user.js";
+
+const orderSchma = new Schema(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      required: true,
+      ref: "User",
+    },
+    items: [
+      {
+        productId: {
+          type: Schema.Types.ObjectId,
+          required: true,
+          ref: "Product",
+        },
+        price: {
+          type: Number,
+          required: true,
+        },
+        quantity: {
+          type: Number,
+          required: true,
+          min: 1,
+          validate: Number.isInteger,
+        },
+      },
+    ],
+    totalAmount: {
+      type: Number,
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "confirmed", "shipped", "delivered", "cancelled"],
+      default: "pending",
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "confirmed", "failed", "refunded"],
+      default: "pending",
+    },
+    shippingAddress: {
+      street: {
+        type: String,
+        required: true,
+      },
+      city: {
+        type: String,
+        required: true,
+      },
+      state: {
+        type: String,
+        required: true,
+      },
+      pincode: {
+        type: String,
+        required: true,
+      },
+      country: {
+        type: String,
+        required: true,
+      },
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
+
+const Order = mongoose.model("order", orderSchma);
+
+export default Order;
+
+===== FILE: models/product.js =====
+import mongoose from "mongoose";
+
+const {Schema} = mongoose
+
+
+const productSchema = new Schema ({
+    name : {
+       type :  String,
+       required : true
+    },
+     price : {
+       type :  Number,
+         required : true,
+         min : 0
+    },
+     description : {
+       type :  String
+    },
+     stock : {
+       type :  Number,
+       required : true,
+       min : 0 ,
+        validate: {
+        validator: Number.isInteger,
+        message: "Stock must be a whole number"
+    }
+    },
+    category : {
+        type : String,
+        required : true
+    },
+    image: {
+    url: String,
+    publicId: String
+}
+
+})
+
+const Product = mongoose.model('Product' , productSchema)
+
+export default Product;
+
+===== FILE: models/user.js =====
+import mongoose from "mongoose";
+
+const {Schema} = mongoose;
+
+
+const userSchema = new Schema({
+    name : {
+        type : String,
+        required : true
+    },
+    email : {
+        type : String,
+        required : true,
+        unique : true,
+        trim : true,
+        lowercase : true
+    },
+    password : {
+        type : String,
+        required : true
+    },
+    role : {
+        type : String,
+        enum : ["user","admin"],
+        default : "user"
+    }
+
+})
+
+const User = mongoose.model('User', userSchema);
+
+export default User;
+
+===== FILE: package-lock.json =====
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "backend",
+      "version": "1.0.0",
+      "license": "ISC",
+      "dependencies": {
+        "bcrypt": "^6.0.0",
+        "cookie-parser": "^1.4.7",
+        "dotenv": "^18.0.8",
+        "email-validator": "^2.0.4",
+        "express": "^5.3.0",
+        "jsonwebtoken": "^9.0.3",
+        "mongoose": "^9.11.2",
+        "validator": "^13.15.35"
+      }
+    },
+    "node_modules/@mongodb-js/saslprep": {
+      "version": "1.6.1",
+      "resolved": "https://registry.npmjs.org/@mongodb-js/saslprep/-/saslprep-1.6.1.tgz",
+      "integrity": "sha512-D4CQtk9IwjCLAvCf1xvHEod3960q8XMUzfmdRU9qjUNlHnesGuTOvJcOTaPm9koZ1caUKA2aTbszZiAkcmSgmg==",
+      "license": "MIT",
+      "dependencies": {
+        "sparse-bitfield": "^3.0.3"
+      }
+    },
+    "node_modules/@standard-schema/spec": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/@standard-schema/spec/-/spec-1.1.0.tgz",
+      "integrity": "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==",
+      "license": "MIT"
+    },
+    "node_modules/@types/webidl-conversions": {
+      "version": "7.0.3",
+      "resolved": "https://registry.npmjs.org/@types/webidl-conversions/-/webidl-conversions-7.0.3.tgz",
+      "integrity": "sha512-CiJJvcRtIgzadHCYXw7dqEnMNRjhGZlYK05Mj9OyktqV8uVT8fD2BFOB7S1uwBE3Kj2Z+4UyPmFw/Ixgw/LAlA==",
+      "license": "MIT"
+    },
+    "node_modules/@types/whatwg-url": {
+      "version": "13.0.0",
+      "resolved": "https://registry.npmjs.org/@types/whatwg-url/-/whatwg-url-13.0.0.tgz",
+      "integrity": "sha512-N8WXpbE6Wgri7KUSvrmQcqrMllKZ9uxkYWMt+mCSGwNc0Hsw9VQTW7ApqI4XNrx6/SaM2QQJCzMPDEXE058s+Q==",
+      "license": "MIT",
+      "dependencies": {
+        "@types/webidl-conversions": "*"
+      }
+    },
+    "node_modules/accepts": {
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/accepts/-/accepts-2.0.0.tgz",
+      "integrity": "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==",
+      "license": "MIT",
+      "dependencies": {
+        "mime-types": "^3.0.0",
+        "negotiator": "^1.0.0"
+      },
+      "engines": {
+        "node": ">= 0.6"
+      }
+    },
+    "node_modules/bcrypt": {
+      "version": "6.0.0",
+      "resolved": "https://registry.npmjs.org/bcrypt/-/bcrypt-6.0.0.tgz",
+      "integrity": "sha512-cU8v/EGSrnH+HnxV2z0J7/blxH8gq7Xh2JFT6Aroax7UohdmiJJlxApMxtKfuI7z68NvvVcmR78k2LbT6efhRg==",
+      "hasInstallScript": true,
+      "license": "MIT",
+      "dependencies": {
+        "node-addon-api": "^8.3.0",
+        "node-gyp-build": "^4.8.4"
+      },
+      "engines": {
+        "node": ">= 18"
+      }
+    },
+    "node_modules/body-parser": {
+      "version": "2.3.0",
+      "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-2.3.0.tgz",
+      "integrity": "sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==",
+      "license": "MIT",
+      "dependencies": {
+        "bytes": "^3.1.2",
+        "content-type": "^2.0.0",
+        "debug": "^4.4.3",
+        "http-errors": "^2.0.1",
+        "iconv-lite": "^0.7.2",
+        "on-finished": "^2.4.1",
+        "qs": "^6.15.2",
+        "raw-body": "^3.0.2",
+        "type-is": "^2.1.0"
+      },
+      "engines": {
+        "node": ">=18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/bson": {
+      "version": "7.3.3",
+      "resolved": "https://registry.npmjs.org/bson/-/bson-7.3.3.tgz",
+      "integrity": "sha512-oz3LwE3qGEhTCSyhzQRLY3Bj1NLOsjFMf6tcmY5J8M+3R7EVcmoBfSHWvjUK3yXCLDUsGpIuB3aQL4nDZ1EV/g==",
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=20.19.0"
+      }
+    },
+    "node_modules/buffer-equal-constant-time": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
+      "integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==",
+      "license": "BSD-3-Clause"
+    },
+    "node_modules/bytes": {
+      "version": "3.1.2",
+      "resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
+      "integrity": "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/call-bind-apply-helpers": {
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
+      "integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
+      "license": "MIT",
+      "dependencies": {
+        "es-errors": "^1.3.0",
+        "function-bind": "^1.1.2"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/call-bound": {
+      "version": "1.0.4",
+      "resolved": "https://registry.npmjs.org/call-bound/-/call-bound-1.0.4.tgz",
+      "integrity": "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==",
+      "license": "MIT",
+      "dependencies": {
+        "call-bind-apply-helpers": "^1.0.2",
+        "get-intrinsic": "^1.3.0"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/content-disposition": {
+      "version": "2.0.1",
+      "resolved": "https://registry.npmjs.org/content-disposition/-/content-disposition-2.0.1.tgz",
+      "integrity": "sha512-e+H0ZXHSWYrENhQzw1LPuP4oF5MzVKmDU6d3hxlvaPEYLLg62MxtQNPRx4SYSuYJSBUgnQIG4HIN2tEtNv7Dog==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/content-type": {
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/content-type/-/content-type-2.1.0.tgz",
+      "integrity": "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/cookie": {
+      "version": "0.7.2",
+      "resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz",
+      "integrity": "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.6"
+      }
+    },
+    "node_modules/cookie-parser": {
+      "version": "1.4.7",
+      "resolved": "https://registry.npmjs.org/cookie-parser/-/cookie-parser-1.4.7.tgz",
+      "integrity": "sha512-nGUvgXnotP3BsjiLX2ypbQnWoGUPIIfHQNZkkC668ntrzGWEZVW70HDEB1qnNGMicPje6EttlIgzo51YSwNQGw==",
+      "license": "MIT",
+      "dependencies": {
+        "cookie": "0.7.2",
+        "cookie-signature": "1.0.6"
+      },
+      "engines": {
+        "node": ">= 0.8.0"
+      }
+    },
+    "node_modules/cookie-parser/node_modules/cookie-signature": {
+      "version": "1.0.6",
+      "resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.0.6.tgz",
+      "integrity": "sha512-QADzlaHc8icV8I7vbaJXJwod9HWYp8uCqf1xa4OfNu1T7JVxQIrUgOWtHdNDtPiywmFbiS12VjotIXLrKM3orQ==",
+      "license": "MIT"
+    },
+    "node_modules/cookie-signature": {
+      "version": "1.2.2",
+      "resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.2.2.tgz",
+      "integrity": "sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=6.6.0"
+      }
+    },
+    "node_modules/debug": {
+      "version": "4.4.3",
+      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",
+      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
+      "license": "MIT",
+      "dependencies": {
+        "ms": "^2.1.3"
+      },
+      "engines": {
+        "node": ">=6.0"
+      },
+      "peerDependenciesMeta": {
+        "supports-color": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/depd": {
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
+      "integrity": "sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/dotenv": {
+      "version": "18.0.8",
+      "resolved": "https://registry.npmjs.org/dotenv/-/dotenv-18.0.8.tgz",
+      "integrity": "sha512-2KDeoFoK/zRtcnbunCDlLG5VWVMcyqeQc6iK65o231nfNAcuGrKoqUQfJFUtBI+QlShk5HKIHxwebBtUl3rEfA==",
+      "license": "BSD-2-Clause",
+      "bin": {
+        "dotenv": "dist/index.cjs"
+      },
+      "engines": {
+        "node": ">=12"
+      },
+      "funding": {
+        "url": "https://dotenvx.com"
+      }
+    },
+    "node_modules/dunder-proto": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
+      "integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
+      "license": "MIT",
+      "dependencies": {
+        "call-bind-apply-helpers": "^1.0.1",
+        "es-errors": "^1.3.0",
+        "gopd": "^1.2.0"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/ecdsa-sig-formatter": {
+      "version": "1.0.11",
+      "resolved": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
+      "integrity": "sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==",
+      "license": "Apache-2.0",
+      "dependencies": {
+        "safe-buffer": "^5.0.1"
+      }
+    },
+    "node_modules/ee-first": {
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
+      "integrity": "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==",
+      "license": "MIT"
+    },
+    "node_modules/email-validator": {
+      "version": "2.0.4",
+      "resolved": "https://registry.npmjs.org/email-validator/-/email-validator-2.0.4.tgz",
+      "integrity": "sha512-gYCwo7kh5S3IDyZPLZf6hSS0MnZT8QmJFqYvbqlDZSbwdZlY6QZWxJ4i/6UhITOJ4XzyI647Bm2MXKCLqnJ4nQ==",
+      "engines": {
+        "node": ">4.0"
+      }
+    },
+    "node_modules/encodeurl": {
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
+      "integrity": "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/es-define-property": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
+      "integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/es-errors": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
+      "integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/es-object-atoms": {
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.2.tgz",
+      "integrity": "sha512-HWcBoN6NileqtSydK2FqHbS/LoDd2pqrnQHLyJzBj4kOp/ky2MWMN694xOfkK8/SnUsW2DH7EfyVlydKCsm1Zw==",
+      "license": "MIT",
+      "dependencies": {
+        "es-errors": "^1.3.0"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/escape-html": {
+      "version": "1.0.3",
+      "resolved": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
+      "integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==",
+      "license": "MIT"
+    },
+    "node_modules/etag": {
+      "version": "1.8.1",
+      "resolved": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
+      "integrity": "sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.6"
+      }
+    },
+    "node_modules/express": {
+      "version": "5.3.0",
+      "resolved": "https://registry.npmjs.org/express/-/express-5.3.0.tgz",
+      "integrity": "sha512-qCqy1xSoaugxOD4IVHb1ZWdkvCF2W3aE2okKouWj8VwJ+ztskSiXoBnCSJqfKT+cVPJhuJqe9YLbY425+Zh00g==",
+      "license": "MIT",
+      "dependencies": {
+        "accepts": "^2.0.0",
+        "body-parser": "^2.3.0",
+        "content-disposition": "^2.0.1",
+        "content-type": "^2.0.0",
+        "cookie": "^0.7.1",
+        "cookie-signature": "^1.2.1",
+        "debug": "^4.4.0",
+        "depd": "^2.0.0",
+        "encodeurl": "^2.0.0",
+        "escape-html": "^1.0.3",
+        "etag": "^1.8.1",
+        "finalhandler": "^2.1.0",
+        "fresh": "^2.0.0",
+        "http-errors": "^2.0.0",
+        "merge-descriptors": "^2.0.0",
+        "mime-types": "^3.0.0",
+        "on-finished": "^2.4.1",
+        "once": "^1.4.0",
+        "parseurl": "^1.3.3",
+        "proxy-addr": "^2.0.8",
+        "qs": "^6.16.0",
+        "range-parser": "^1.2.1",
+        "router": "^2.2.0",
+        "send": "^1.1.0",
+        "serve-static": "^2.2.0",
+        "statuses": "^2.0.1",
+        "type-is": "^2.1.0",
+        "vary": "^1.1.2"
+      },
+      "engines": {
+        "node": ">= 18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/finalhandler": {
+      "version": "2.1.1",
+      "resolved": "https://registry.npmjs.org/finalhandler/-/finalhandler-2.1.1.tgz",
+      "integrity": "sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==",
+      "license": "MIT",
+      "dependencies": {
+        "debug": "^4.4.0",
+        "encodeurl": "^2.0.0",
+        "escape-html": "^1.0.3",
+        "on-finished": "^2.4.1",
+        "parseurl": "^1.3.3",
+        "statuses": "^2.0.1"
+      },
+      "engines": {
+        "node": ">= 18.0.0"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/forwarded": {
+      "version": "0.2.0",
+      "resolved": "https://registry.npmjs.org/forwarded/-/forwarded-0.2.0.tgz",
+      "integrity": "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.6"
+      }
+    },
+    "node_modules/fresh": {
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/fresh/-/fresh-2.0.0.tgz",
+      "integrity": "sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/function-bind": {
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
+      "integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==",
+      "license": "MIT",
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/get-intrinsic": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
+      "integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
+      "license": "MIT",
+      "dependencies": {
+        "call-bind-apply-helpers": "^1.0.2",
+        "es-define-property": "^1.0.1",
+        "es-errors": "^1.3.0",
+        "es-object-atoms": "^1.1.1",
+        "function-bind": "^1.1.2",
+        "get-proto": "^1.0.1",
+        "gopd": "^1.2.0",
+        "has-symbols": "^1.1.0",
+        "hasown": "^2.0.2",
+        "math-intrinsics": "^1.1.0"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/get-proto": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
+      "integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
+      "license": "MIT",
+      "dependencies": {
+        "dunder-proto": "^1.0.1",
+        "es-object-atoms": "^1.0.0"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/gopd": {
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
+      "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/has-symbols": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
+      "integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/hasown": {
+      "version": "2.0.4",
+      "resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.4.tgz",
+      "integrity": "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==",
+      "license": "MIT",
+      "dependencies": {
+        "function-bind": "^1.1.2"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/http-errors": {
+      "version": "2.0.1",
+      "resolved": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.1.tgz",
+      "integrity": "sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==",
+      "license": "MIT",
+      "dependencies": {
+        "depd": "~2.0.0",
+        "inherits": "~2.0.4",
+        "setprototypeof": "~1.2.0",
+        "statuses": "~2.0.2",
+        "toidentifier": "~1.0.1"
+      },
+      "engines": {
+        "node": ">= 0.8"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/iconv-lite": {
+      "version": "0.7.3",
+      "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.7.3.tgz",
+      "integrity": "sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==",
+      "license": "MIT",
+      "dependencies": {
+        "safer-buffer": ">= 2.1.2 < 3.0.0"
+      },
+      "engines": {
+        "node": ">=0.10.0"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/inherits": {
+      "version": "2.0.4",
+      "resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz",
+      "integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==",
+      "license": "ISC"
+    },
+    "node_modules/ipaddr.js": {
+      "version": "1.9.1",
+      "resolved": "https://registry.npmjs.org/ipaddr.js/-/ipaddr.js-1.9.1.tgz",
+      "integrity": "sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.10"
+      }
+    },
+    "node_modules/is-promise": {
+      "version": "4.0.0",
+      "resolved": "https://registry.npmjs.org/is-promise/-/is-promise-4.0.0.tgz",
+      "integrity": "sha512-hvpoI6korhJMnej285dSg6nu1+e6uxs7zG3BYAm5byqDsgJNWwxzM6z6iZiAgQR4TJ30JmBTOwqZUw3WlyH3AQ==",
+      "license": "MIT"
+    },
+    "node_modules/jsonwebtoken": {
+      "version": "9.0.3",
+      "resolved": "https://registry.npmjs.org/jsonwebtoken/-/jsonwebtoken-9.0.3.tgz",
+      "integrity": "sha512-MT/xP0CrubFRNLNKvxJ2BYfy53Zkm++5bX9dtuPbqAeQpTVe0MQTFhao8+Cp//EmJp244xt6Drw/GVEGCUj40g==",
+      "license": "MIT",
+      "dependencies": {
+        "jws": "^4.0.1",
+        "lodash.includes": "^4.3.0",
+        "lodash.isboolean": "^3.0.3",
+        "lodash.isinteger": "^4.0.4",
+        "lodash.isnumber": "^3.0.3",
+        "lodash.isplainobject": "^4.0.6",
+        "lodash.isstring": "^4.0.1",
+        "lodash.once": "^4.0.0",
+        "ms": "^2.1.1",
+        "semver": "^7.5.4"
+      },
+      "engines": {
+        "node": ">=12",
+        "npm": ">=6"
+      }
+    },
+    "node_modules/jwa": {
+      "version": "2.0.1",
+      "resolved": "https://registry.npmjs.org/jwa/-/jwa-2.0.1.tgz",
+      "integrity": "sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==",
+      "license": "MIT",
+      "dependencies": {
+        "buffer-equal-constant-time": "^1.0.1",
+        "ecdsa-sig-formatter": "1.0.11",
+        "safe-buffer": "^5.0.1"
+      }
+    },
+    "node_modules/jws": {
+      "version": "4.0.1",
+      "resolved": "https://registry.npmjs.org/jws/-/jws-4.0.1.tgz",
+      "integrity": "sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA==",
+      "license": "MIT",
+      "dependencies": {
+        "jwa": "^2.0.1",
+        "safe-buffer": "^5.0.1"
+      }
+    },
+    "node_modules/kareem": {
+      "version": "3.4.1",
+      "resolved": "https://registry.npmjs.org/kareem/-/kareem-3.4.1.tgz",
+      "integrity": "sha512-UlgCAFNAdk/HLSsbfkmbH8pJqpEN52Ek8RG53Ys1i3Q3gbCQruSrWpplZlgIGyDHX/LNoLW97ei3OG43s7UhUA==",
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=18.0.0"
+      }
+    },
+    "node_modules/lodash.includes": {
+      "version": "4.3.0",
+      "resolved": "https://registry.npmjs.org/lodash.includes/-/lodash.includes-4.3.0.tgz",
+      "integrity": "sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w==",
+      "license": "MIT"
+    },
+    "node_modules/lodash.isboolean": {
+      "version": "3.0.3",
+      "resolved": "https://registry.npmjs.org/lodash.isboolean/-/lodash.isboolean-3.0.3.tgz",
+      "integrity": "sha512-Bz5mupy2SVbPHURB98VAcw+aHh4vRV5IPNhILUCsOzRmsTmSQ17jIuqopAentWoehktxGd9e/hbIXq980/1QJg==",
+      "license": "MIT"
+    },
+    "node_modules/lodash.isinteger": {
+      "version": "4.0.4",
+      "resolved": "https://registry.npmjs.org/lodash.isinteger/-/lodash.isinteger-4.0.4.tgz",
+      "integrity": "sha512-DBwtEWN2caHQ9/imiNeEA5ys1JoRtRfY3d7V9wkqtbycnAmTvRRmbHKDV4a0EYc678/dia0jrte4tjYwVBaZUA==",
+      "license": "MIT"
+    },
+    "node_modules/lodash.isnumber": {
+      "version": "3.0.3",
+      "resolved": "https://registry.npmjs.org/lodash.isnumber/-/lodash.isnumber-3.0.3.tgz",
+      "integrity": "sha512-QYqzpfwO3/CWf3XP+Z+tkQsfaLL/EnUlXWVkIk5FUPc4sBdTehEqZONuyRt2P67PXAk+NXmTBcc97zw9t1FQrw==",
+      "license": "MIT"
+    },
+    "node_modules/lodash.isplainobject": {
+      "version": "4.0.6",
+      "resolved": "https://registry.npmjs.org/lodash.isplainobject/-/lodash.isplainobject-4.0.6.tgz",
+      "integrity": "sha512-oSXzaWypCMHkPC3NvBEaPHf0KsA5mvPrOPgQWDsbg8n7orZ290M0BmC/jgRZ4vcJ6DTAhjrsSYgdsW/F+MFOBA==",
+      "license": "MIT"
+    },
+    "node_modules/lodash.isstring": {
+      "version": "4.0.1",
+      "resolved": "https://registry.npmjs.org/lodash.isstring/-/lodash.isstring-4.0.1.tgz",
+      "integrity": "sha512-0wJxfxH1wgO3GrbuP+dTTk7op+6L41QCXbGINEmD+ny/G/eCqGzxyCsh7159S+mgDDcoarnBw6PC1PS5+wUGgw==",
+      "license": "MIT"
+    },
+    "node_modules/lodash.once": {
+      "version": "4.1.1",
+      "resolved": "https://registry.npmjs.org/lodash.once/-/lodash.once-4.1.1.tgz",
+      "integrity": "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg==",
+      "license": "MIT"
+    },
+    "node_modules/math-intrinsics": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
+      "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.4"
+      }
+    },
+    "node_modules/media-typer": {
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/media-typer/-/media-typer-1.1.1.tgz",
+      "integrity": "sha512-yz3xRaG20c6/BOzvYoDaGtPmGscs7YivItZEEqe6GbwNfHuxu9YNmvnEkMzKldAGY4/80pRcQRZSEnhquk9XuQ==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/memory-pager": {
+      "version": "1.5.0",
+      "resolved": "https://registry.npmjs.org/memory-pager/-/memory-pager-1.5.0.tgz",
+      "integrity": "sha512-ZS4Bp4r/Zoeq6+NLJpP+0Zzm0pR8whtGPf1XExKLJBAczGMnSi3It14OiNCStjQjM6NU1okjQGSxgEZN8eBYKg==",
+      "license": "MIT"
+    },
+    "node_modules/merge-descriptors": {
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-2.0.0.tgz",
+      "integrity": "sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=18"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/sindresorhus"
+      }
+    },
+    "node_modules/mime-db": {
+      "version": "1.54.0",
+      "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.54.0.tgz",
+      "integrity": "sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.6"
+      }
+    },
+    "node_modules/mime-types": {
+      "version": "3.0.2",
+      "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-3.0.2.tgz",
+      "integrity": "sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==",
+      "license": "MIT",
+      "dependencies": {
+        "mime-db": "^1.54.0"
+      },
+      "engines": {
+        "node": ">=18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/mongodb": {
+      "version": "7.7.0",
+      "resolved": "https://registry.npmjs.org/mongodb/-/mongodb-7.7.0.tgz",
+      "integrity": "sha512-XG1xXEqyouAV8GCb3PuRaujofeXKpAJAPvXYWZgHl6Dz4QHSJ1nRLl0+GpqaLTwKvC0RFE9truOur34RNFY1nw==",
+      "license": "Apache-2.0",
+      "dependencies": {
+        "@mongodb-js/saslprep": "^1.5.0",
+        "bson": "^7.3.2",
+        "mongodb-connection-string-url": "^7.0.2"
+      },
+      "engines": {
+        "node": ">=20.19.0"
+      },
+      "peerDependencies": {
+        "@aws-sdk/credential-providers": "^3.806.0",
+        "@mongodb-js/zstd": "^7.0.0",
+        "gcp-metadata": "^7.0.1",
+        "kerberos": "^7.0.0",
+        "mongodb-client-encryption": "^7.2.0",
+        "snappy": "^7.3.2",
+        "socks": "^2.8.6"
+      },
+      "peerDependenciesMeta": {
+        "@aws-sdk/credential-providers": {
+          "optional": true
+        },
+        "@mongodb-js/zstd": {
+          "optional": true
+        },
+        "gcp-metadata": {
+          "optional": true
+        },
+        "kerberos": {
+          "optional": true
+        },
+        "mongodb-client-encryption": {
+          "optional": true
+        },
+        "snappy": {
+          "optional": true
+        },
+        "socks": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/mongodb-connection-string-url": {
+      "version": "7.0.2",
+      "resolved": "https://registry.npmjs.org/mongodb-connection-string-url/-/mongodb-connection-string-url-7.0.2.tgz",
+      "integrity": "sha512-ZoS07RoFqpKYQwAk59qmrx8+jJHNHU30UjlU96QktiGn1ltvDr+vCznLX5DiUBLEpMAHatHNWV1nM/74ul66kA==",
+      "license": "Apache-2.0",
+      "dependencies": {
+        "@types/whatwg-url": "^13.0.0",
+        "whatwg-url": "^14.1.0"
+      },
+      "engines": {
+        "node": ">=20.19.0"
+      }
+    },
+    "node_modules/mongoose": {
+      "version": "9.11.2",
+      "resolved": "https://registry.npmjs.org/mongoose/-/mongoose-9.11.2.tgz",
+      "integrity": "sha512-hFkl/2dccpD58coRAya3a/ht8ooAx9YPLzBfxVX9bEsgcrjsNkvuWQe8gplGfDdmzpw2RfFX1IB/G8PiFwyvwg==",
+      "license": "MIT",
+      "dependencies": {
+        "@standard-schema/spec": "^1.1.0",
+        "kareem": "3.4.1",
+        "mongodb": "~7.7",
+        "mpath": "0.9.0",
+        "mquery": "6.0.0",
+        "ms": "2.1.3",
+        "sift": "17.1.3"
+      },
+      "engines": {
+        "node": ">=20.19.0"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/mongoose"
+      }
+    },
+    "node_modules/mpath": {
+      "version": "0.9.0",
+      "resolved": "https://registry.npmjs.org/mpath/-/mpath-0.9.0.tgz",
+      "integrity": "sha512-ikJRQTk8hw5DEoFVxHG1Gn9T/xcjtdnOKIU1JTmGjZZlg9LST2mBLmcX3/ICIbgJydT2GOc15RnNy5mHmzfSew==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=4.0.0"
+      }
+    },
+    "node_modules/mquery": {
+      "version": "6.0.0",
+      "resolved": "https://registry.npmjs.org/mquery/-/mquery-6.0.0.tgz",
+      "integrity": "sha512-b2KQNsmgtkscfeDgkYMcWGn9vZI9YoXh802VDEwE6qc50zxBFQ0Oo8ROkawbPAsXCY1/Z1yp0MagqsZStPWJjw==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=20.19.0"
+      }
+    },
+    "node_modules/ms": {
+      "version": "2.1.3",
+      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
+      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+      "license": "MIT"
+    },
+    "node_modules/negotiator": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/negotiator/-/negotiator-1.1.0.tgz",
+      "integrity": "sha512-NMPBRMJgiQHjbd8phG3Vebdx4kZ1H121rbl5IkMqeOsahptB9BKo/d7oJ3zTXqTgagn2bWlNSXkh0QUGM31RYg==",
+      "license": "MIT",
+      "dependencies": {
+        "content-type": "^2.1.0"
+      },
+      "engines": {
+        "node": ">=18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/node-addon-api": {
+      "version": "8.9.2",
+      "resolved": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-8.9.2.tgz",
+      "integrity": "sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==",
+      "license": "MIT",
+      "engines": {
+        "node": "^18 || ^20 || >= 21"
+      }
+    },
+    "node_modules/node-gyp-build": {
+      "version": "4.8.4",
+      "resolved": "https://registry.npmjs.org/node-gyp-build/-/node-gyp-build-4.8.4.tgz",
+      "integrity": "sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==",
+      "license": "MIT",
+      "bin": {
+        "node-gyp-build": "bin.js",
+        "node-gyp-build-optional": "optional.js",
+        "node-gyp-build-test": "build-test.js"
+      }
+    },
+    "node_modules/object-inspect": {
+      "version": "1.13.4",
+      "resolved": "https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.4.tgz",
+      "integrity": "sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/on-finished": {
+      "version": "2.4.1",
+      "resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.4.1.tgz",
+      "integrity": "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==",
+      "license": "MIT",
+      "dependencies": {
+        "ee-first": "1.1.1"
+      },
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/once": {
+      "version": "1.4.0",
+      "resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
+      "integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
+      "license": "ISC",
+      "dependencies": {
+        "wrappy": "1"
+      }
+    },
+    "node_modules/parseurl": {
+      "version": "1.3.3",
+      "resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
+      "integrity": "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/path-to-regexp": {
+      "version": "8.4.2",
+      "resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-8.4.2.tgz",
+      "integrity": "sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==",
+      "license": "MIT",
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/proxy-addr": {
+      "version": "2.0.8",
+      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.8.tgz",
+      "integrity": "sha512-5nnx0yGyVUcY6t9RnWcARWtwT9F1D8O9rt08htPvnd49W1IgZtmLkhu9WfMzQj1cFxjHIO6connUNVW5k7AVyQ==",
+      "license": "MIT",
+      "dependencies": {
+        "forwarded": "0.2.0",
+        "ipaddr.js": "1.9.1"
+      },
+      "engines": {
+        "node": ">= 0.10"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/punycode": {
+      "version": "2.3.1",
+      "resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
+      "integrity": "sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=6"
+      }
+    },
+    "node_modules/qs": {
+      "version": "6.16.1",
+      "resolved": "https://registry.npmjs.org/qs/-/qs-6.16.1.tgz",
+      "integrity": "sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==",
+      "license": "BSD-3-Clause",
+      "dependencies": {
+        "es-define-property": "^1.0.1",
+        "side-channel": "^1.1.1"
+      },
+      "engines": {
+        "node": ">=0.6"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/range-parser": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/range-parser/-/range-parser-1.3.0.tgz",
+      "integrity": "sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.6"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/raw-body": {
+      "version": "3.0.2",
+      "resolved": "https://registry.npmjs.org/raw-body/-/raw-body-3.0.2.tgz",
+      "integrity": "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA==",
+      "license": "MIT",
+      "dependencies": {
+        "bytes": "~3.1.2",
+        "http-errors": "~2.0.1",
+        "iconv-lite": "~0.7.0",
+        "unpipe": "~1.0.0"
+      },
+      "engines": {
+        "node": ">= 0.10"
+      }
+    },
+    "node_modules/router": {
+      "version": "2.2.0",
+      "resolved": "https://registry.npmjs.org/router/-/router-2.2.0.tgz",
+      "integrity": "sha512-nLTrUKm2UyiL7rlhapu/Zl45FwNgkZGaCpZbIHajDYgwlJCOzLSk+cIPAnsEqV955GjILJnKbdQC1nVPz+gAYQ==",
+      "license": "MIT",
+      "dependencies": {
+        "debug": "^4.4.0",
+        "depd": "^2.0.0",
+        "is-promise": "^4.0.0",
+        "parseurl": "^1.3.3",
+        "path-to-regexp": "^8.0.0"
+      },
+      "engines": {
+        "node": ">= 18"
+      }
+    },
+    "node_modules/safe-buffer": {
+      "version": "5.2.1",
+      "resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz",
+      "integrity": "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==",
+      "funding": [
+        {
+          "type": "github",
+          "url": "https://github.com/sponsors/feross"
+        },
+        {
+          "type": "patreon",
+          "url": "https://www.patreon.com/feross"
+        },
+        {
+          "type": "consulting",
+          "url": "https://feross.org/support"
+        }
+      ],
+      "license": "MIT"
+    },
+    "node_modules/safer-buffer": {
+      "version": "2.1.2",
+      "resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
+      "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
+      "license": "MIT"
+    },
+    "node_modules/semver": {
+      "version": "7.8.5",
+      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+      "license": "ISC",
+      "bin": {
+        "semver": "bin/semver.js"
+      },
+      "engines": {
+        "node": ">=10"
+      }
+    },
+    "node_modules/send": {
+      "version": "1.2.1",
+      "resolved": "https://registry.npmjs.org/send/-/send-1.2.1.tgz",
+      "integrity": "sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==",
+      "license": "MIT",
+      "dependencies": {
+        "debug": "^4.4.3",
+        "encodeurl": "^2.0.0",
+        "escape-html": "^1.0.3",
+        "etag": "^1.8.1",
+        "fresh": "^2.0.0",
+        "http-errors": "^2.0.1",
+        "mime-types": "^3.0.2",
+        "ms": "^2.1.3",
+        "on-finished": "^2.4.1",
+        "range-parser": "^1.2.1",
+        "statuses": "^2.0.2"
+      },
+      "engines": {
+        "node": ">= 18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/serve-static": {
+      "version": "2.2.1",
+      "resolved": "https://registry.npmjs.org/serve-static/-/serve-static-2.2.1.tgz",
+      "integrity": "sha512-xRXBn0pPqQTVQiC8wyQrKs2MOlX24zQ0POGaj0kultvoOCstBQM5yvOhAVSUwOMjQtTvsPWoNCHfPGwaaQJhTw==",
+      "license": "MIT",
+      "dependencies": {
+        "encodeurl": "^2.0.0",
+        "escape-html": "^1.0.3",
+        "parseurl": "^1.3.3",
+        "send": "^1.2.0"
+      },
+      "engines": {
+        "node": ">= 18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/setprototypeof": {
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz",
+      "integrity": "sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==",
+      "license": "ISC"
+    },
+    "node_modules/side-channel": {
+      "version": "1.1.1",
+      "resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.1.tgz",
+      "integrity": "sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==",
+      "license": "MIT",
+      "dependencies": {
+        "es-errors": "^1.3.0",
+        "object-inspect": "^1.13.4",
+        "side-channel-list": "^1.0.1",
+        "side-channel-map": "^1.0.1",
+        "side-channel-weakmap": "^1.0.2"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/side-channel-list": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.1.tgz",
+      "integrity": "sha512-mjn/0bi/oUURjc5Xl7IaWi/OJJJumuoJFQJfDDyO46+hBWsfaVM65TBHq2eoZBhzl9EchxOijpkbRC8SVBQU0w==",
+      "license": "MIT",
+      "dependencies": {
+        "es-errors": "^1.3.0",
+        "object-inspect": "^1.13.4"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/side-channel-map": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/side-channel-map/-/side-channel-map-1.0.1.tgz",
+      "integrity": "sha512-VCjCNfgMsby3tTdo02nbjtM/ewra6jPHmpThenkTYh8pG9ucZ/1P8So4u4FGBek/BjpOVsDCMoLA/iuBKIFXRA==",
+      "license": "MIT",
+      "dependencies": {
+        "call-bound": "^1.0.2",
+        "es-errors": "^1.3.0",
+        "get-intrinsic": "^1.2.5",
+        "object-inspect": "^1.13.3"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/side-channel-weakmap": {
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/side-channel-weakmap/-/side-channel-weakmap-1.0.2.tgz",
+      "integrity": "sha512-WPS/HvHQTYnHisLo9McqBHOJk2FkHO/tlpvldyrnem4aeQp4hai3gythswg6p01oSoTl58rcpiFAjF2br2Ak2A==",
+      "license": "MIT",
+      "dependencies": {
+        "call-bound": "^1.0.2",
+        "es-errors": "^1.3.0",
+        "get-intrinsic": "^1.2.5",
+        "object-inspect": "^1.13.3",
+        "side-channel-map": "^1.0.1"
+      },
+      "engines": {
+        "node": ">= 0.4"
+      },
+      "funding": {
+        "url": "https://github.com/sponsors/ljharb"
+      }
+    },
+    "node_modules/sift": {
+      "version": "17.1.3",
+      "resolved": "https://registry.npmjs.org/sift/-/sift-17.1.3.tgz",
+      "integrity": "sha512-Rtlj66/b0ICeFzYTuNvX/EF1igRbbnGSvEyT79McoZa/DeGhMyC5pWKOEsZKnpkqtSeovd5FL/bjHWC3CIIvCQ==",
+      "license": "MIT"
+    },
+    "node_modules/sparse-bitfield": {
+      "version": "3.0.3",
+      "resolved": "https://registry.npmjs.org/sparse-bitfield/-/sparse-bitfield-3.0.3.tgz",
+      "integrity": "sha512-kvzhi7vqKTfkh0PZU+2D2PIllw2ymqJKujUcyPMd9Y75Nv4nPbGJZXNhxsgdQab2BmlDct1YnfQCguEvHr7VsQ==",
+      "license": "MIT",
+      "dependencies": {
+        "memory-pager": "^1.0.2"
+      }
+    },
+    "node_modules/statuses": {
+      "version": "2.0.2",
+      "resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.2.tgz",
+      "integrity": "sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/toidentifier": {
+      "version": "1.0.1",
+      "resolved": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz",
+      "integrity": "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=0.6"
+      }
+    },
+    "node_modules/tr46": {
+      "version": "5.1.1",
+      "resolved": "https://registry.npmjs.org/tr46/-/tr46-5.1.1.tgz",
+      "integrity": "sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw==",
+      "license": "MIT",
+      "dependencies": {
+        "punycode": "^2.3.1"
+      },
+      "engines": {
+        "node": ">=18"
+      }
+    },
+    "node_modules/type-is": {
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/type-is/-/type-is-2.1.0.tgz",
+      "integrity": "sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==",
+      "license": "MIT",
+      "dependencies": {
+        "content-type": "^2.0.0",
+        "media-typer": "^1.1.0",
+        "mime-types": "^3.0.0"
+      },
+      "engines": {
+        "node": ">= 18"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
+      }
+    },
+    "node_modules/unpipe": {
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
+      "integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/validator": {
+      "version": "13.15.35",
+      "resolved": "https://registry.npmjs.org/validator/-/validator-13.15.35.tgz",
+      "integrity": "sha512-TQ5pAGhd5whStmqWvYF4OjQROlmv9SMFVt37qoCBdqRffuuklWYQlCNnEs2ZaIBD1kZRNnikiZOS1eqgkar0iw==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.10"
+      }
+    },
+    "node_modules/vary": {
+      "version": "1.1.2",
+      "resolved": "https://registry.npmjs.org/vary/-/vary-1.1.2.tgz",
+      "integrity": "sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==",
+      "license": "MIT",
+      "engines": {
+        "node": ">= 0.8"
+      }
+    },
+    "node_modules/webidl-conversions": {
+      "version": "7.0.0",
+      "resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz",
+      "integrity": "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==",
+      "license": "BSD-2-Clause",
+      "engines": {
+        "node": ">=12"
+      }
+    },
+    "node_modules/whatwg-url": {
+      "version": "14.2.0",
+      "resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-14.2.0.tgz",
+      "integrity": "sha512-De72GdQZzNTUBBChsXueQUnPKDkg/5A5zp7pFDuQAj5UFoENpiACU0wlCvzpAGnTkj++ihpKwKyYewn/XNUbKw==",
+      "license": "MIT",
+      "dependencies": {
+        "tr46": "^5.1.0",
+        "webidl-conversions": "^7.0.0"
+      },
+      "engines": {
+        "node": ">=18"
+      }
+    },
+    "node_modules/wrappy": {
+      "version": "1.0.2",
+      "resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
+      "integrity": "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==",
+      "license": "ISC"
+    }
+  }
+}
+
+===== FILE: routes/adminRouter.js =====
+
+import express from "express";
+
+import {
+  createProduct,
+  updateProduct,
+  deleteProduct,
+} from "../controllers/product.controller.js";
+
+import { userAuth } from "../middleware/userAuth.js";
+import adminAuth from "../middleware/adminAuth.js";
+
+const adminRouter = express.Router();
+
+// Admin-only routes
+adminRouter.post(
+  "/createProduct",
+  userAuth,
+  adminAuth,
+  createProduct
+);
+
+adminRouter.patch(
+  "/updateProduct/:id",
+  userAuth,
+  adminAuth,
+  updateProduct
+);
+
+adminRouter.delete(
+  "/deleteProduct/:id",
+  userAuth,
+  adminAuth,
+  deleteProduct
+);
+
+
+adminRouter.patch(
+  "/order/:orderId/status",
+  userAuth,
+  adminAuth,
+  
+)
+
+export default adminRouter;
+
+===== FILE: routes/authRouter.js =====
+import express from 'express'
+import { createUser, loginUser, logoutUser} from '../controllers/auth.controller.js'
+
+
+const authRouter = express.Router();
+
+authRouter.post('/signup', createUser)
+
+authRouter.post('/login',loginUser)
+
+authRouter.post('/logout',logoutUser)
+
+
+export default authRouter
+
+===== FILE: routes/productRouter.js =====
+import express from "express";
+import {
+  getAllProducts,
+  getProduct,
+} from "../controllers/product.controller.js";
+
+const productRouter = express.Router();
+
+productRouter.get("/", getAllProducts);
+productRouter.get("/:id", getProduct);
+
+export default productRouter;
+
+===== FILE: routes/userRouter.js =====
+import express from 'express'
+import {userAuth} from '../middleware/userAuth.js';
+import { getProfile } from '../controllers/user.controller.js';
+import { addToCart,clearCart,deleteProductInCart,getCartDetails ,updateCart} from '../controllers/cart.controller.js';
+import { cancelOrderById, createOrder, getAllOrders, getOrderById } from '../controllers/order.controller.js';
+
+
+const userRouter = express.Router();
+
+
+userRouter.get('/profile', userAuth,getProfile)
+
+userRouter.get('/cart',userAuth,getCartDetails)
+
+userRouter.post('/cart', userAuth ,addToCart)
+
+userRouter.patch('/cart/:productId',userAuth, updateCart)
+
+userRouter.delete('/cart/:productId',userAuth, deleteProductInCart)
+
+userRouter.delete('/cart',userAuth,clearCart)
+
+userRouter.post('/order',userAuth , createOrder)
+
+userRouter.get('/getAllOrders',userAuth , getAllOrders)
+
+userRouter.get('/order/:orderId', userAuth, getOrderById);
+
+userRouter.patch('/order/:orderId/cancel',userAuth,cancelOrderById)
+
+export default userRouter
+
+===== FILE: server.js =====
+
+import express from 'express';
+import dotenv from 'dotenv';
+import connectDB from './config/database.js';
+import adminRouter from "./routes/adminRouter.js";
+import authRouter from './routes/authRouter.js';
+import cookieParser from "cookie-parser";
+import userRouter from './routes/userRouter.js';
+import productRouter from './routes/productRouter.js';
+dotenv.config();
+
+
+const app = express();
+const PORT = process.env.PORT || 7777;
+
+
+app.use(express.json())
+app.use(cookieParser());
+
+
+
+
+app.use("/admin", adminRouter);
+app.use("/",authRouter)
+app.use("/",userRouter)
+app.use("/products",productRouter)
+
+const startServer = async () => {
+    await connectDB();
+
+    app.listen(PORT, () => {
+        console.log(`Server listening on port ${PORT}`);
+    });
+};
+
+startServer();
+
+===== FILE: validators/orderValidator.js =====
+
+export const BodyOfOrderValidator = (reqBody) =>{
+
+    const { shippingAddress } = reqBody;
+
+    // Checks shipping address is an object and not empty
+if (!shippingAddress || typeof shippingAddress !== "object" || Array.isArray(shippingAddress)) {
+  return  "Shipping address is required";
+}
+
+// checks all thsi fields are present and thier length > 0
+const { street, city, state, pincode, country } = shippingAddress;
+
+if (![street, city, state, pincode, country].every(
+  (field) => typeof field === "string" && field.trim().length > 0)) {
+
+  return  "All shipping address fields are required";
+
+
+}  
+
+return null;
+}
+
+===== FILE: validators/productValidator.js =====
+
+
+export const validateProduct = (reqBody) => {
+  // Step 1: Check that the request body is a valid object
+  if (!reqBody || typeof reqBody !== "object" || Array.isArray(reqBody)) {
+    return "Invalid product data";
+  }
+
+  // Step 2: Reject fields that are not allowed
+  const allowedFields = [
+    "name",
+    "description",
+    "price",
+    "stock",
+    "category",
+    "image",
+  ];
+
+  const requestedFields = Object.keys(reqBody);
+
+  if (!requestedFields.every((field) => allowedFields.includes(field))) {
+    return "Invalid product fields provided";
+  }
+
+  // Step 3: Extract the approved fields
+  const { name, description, price, stock, category, image } = reqBody;
+
+  // Step 4: Validate each field
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    return "Product name is required";
+  }
+
+  if (!description || typeof description !== "string") {
+    return "Product description is required";
+  }
+
+  if (typeof price !== "number" || price < 0 || !Number.isFinite(price)) {
+    return "Price must be a valid non-negative number";
+  }
+
+  if (!Number.isInteger(stock) || stock < 0) {
+    return "Stock must be a non-negative integer";
+  }
+
+  if (
+    !category ||
+    typeof category !== "string" ||
+    category.trim().length === 0
+  ) {
+    return "Product category is required";
+  }
+
+  if (!image || typeof image !== "object" || Array.isArray(image)) {
+    return "Product image is required";
+  }
+
+  if (
+    typeof image.url !== "string" ||
+    image.url.trim().length === 0 ||
+    typeof image.publicId !== "string" ||
+    image.publicId.trim().length === 0
+  ) {
+    return "Image must contain a valid url and publicId";
+  }
+
+  return null;
+};
+
+
+
+
+export const validateProductUpdate = (body) => {
+
+    console.log("Inside validate Product Update")
+  // 1. Validate the request body
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return "Invalid product data";
+  }
+
+  // 2. Reject empty updates
+  const requestedFields = Object.keys(body);
+
+  if (requestedFields.length === 0) {
+    return "Update body cannot be empty";
+  }
+
+  // 3. Allow only approved fields
+  const allowedFields = [
+    "name",
+    "description",
+    "price",
+    "stock",
+    "category",
+    "image",
+  ];
+
+  if (!requestedFields.every((field) => allowedFields.includes(field))) {
+    return "Invalid fields provided for update";
+  }
+
+  // 4. Validate only the fields that were provided
+  const { name, description, price, stock, category, image } = body;
+
+  if (
+    "name" in body &&
+    (typeof name !== "string" || name.trim().length === 0)
+  ) {
+    return "Product name must be a non-empty string";
+  }
+
+  if (
+    "description" in body &&
+    typeof description !== "string"
+  ) {
+    return "Description must be a string";
+  }
+
+  if (
+    "price" in body &&
+    (typeof price !== "number" ||
+      !Number.isFinite(price) ||
+      price < 0)
+  ) {
+    return "Price must be a valid non-negative number";
+  }
+
+  if ("stock" in body && (!Number.isInteger(stock) || stock < 0)) {
+    return "Stock must be a non-negative integer";
+  }
+
+  if (
+    "category" in body &&
+    (typeof category !== "string" || category.trim().length === 0)
+  ) {
+    return "Category must be a non-empty string";
+  }
+
+  if ("image" in body) {
+    if (!image || typeof image !== "object" || Array.isArray(image)) {
+      return "Image must be a valid object";
+    }
+
+    if (
+      typeof image.url !== "string" ||
+      image.url.trim().length === 0 ||
+      typeof image.publicId !== "string" ||
+      image.publicId.trim().length === 0
+    ) {
+      return "Image must contain a valid url and publicId";
+    }
+  }
+
+  return null;
+};
+
+
+
+
+
+/*
+
+Guard: Rejects invalid request bodies.
+Allowlist: Rejects unexpected fields like isAdminApproved.
+Destructuring: Extracts the approved product fields.
+Validation: Checks the values of those fields.
+
+*/
+
+===== FILE: validators/userValidator.js =====
+import validator from "validator";
+
+export const validateUser = (reqBody) => {
+  // Step 1: Check the user fields can send only the required fields
+  const allowedFields = ["name", "email", "password"];
+
+  // Check if reqBody is a valid object
+
+  if (!reqBody || typeof reqBody !== "object" || Array.isArray(reqBody)) {
+    return "Invalid request body";
+  }
+
+  const requestedFields = Object.keys(reqBody);
+
+  const isAllowed = requestedFields.every((field) =>
+    allowedFields.includes(field),
+  );
+
+  if (!isAllowed) {
+    return "Invalid fields provided";
+  }
+
+  const { name, email, password } = reqBody;
+
+  if (typeof name !== "string" || !name.trim()) {
+    return "Name is required";
+  }
+
+  if (typeof email !== "string" || !email.trim()) {
+    return "Email is required";
+  }
+
+  if (typeof password !== "string" || !password) {
+    return "Password is required";
+  }
+
+  //Step 2 : Check name should not be empty
+
+  if (name.trim().length < 3) {
+    return "Name must be at least 3 characters";
+  }
+
+  // Validate email through validate npm package
+
+  if (!validator.isEmail(email)) {
+    // if it passes it returns true so if not passes it returns false
+    return "Invalid email";
+  }
+
+  // Validate strong password weak password gets rejected
+
+  if (!validator.isStrongPassword(password)) {
+    return "Password is too weak";
+  }
+
+  return null; // means all the checks are passed
+};
+
+
+export const validateUserLogin = (reqBody) => {
+  // Step 1: Validate request body
+  if (
+    !reqBody ||
+    typeof reqBody !== "object" ||
+    Array.isArray(reqBody)
+  ) {
+    return "Invalid request body";
+  }
+
+  // Step 2: Allow only email and password
+  const allowedFields = ["email","password"];
+  const requestedFields = Object.keys(reqBody);
+  console.log(requestedFields);
+
+  const isAllowed = requestedFields.every((field) =>
+    allowedFields.includes(field)
+  );
+
+  if (!isAllowed) {
+    return "Invalid fields provided";
+  }
+
+  // Step 3: Extract fields
+  const { email, password } = reqBody;
+
+  // Step 4: Check email
+  if (typeof email !== "string" || !email.trim()) {
+    return "Email is required";
+  }
+
+  // Step 5: Check password
+  if (typeof password !== "string" || !password) {
+    return "Password is required";
+  }
+
+  // Step 6: Validate email format
+  if (!validator.isEmail(email)) {
+    return "Invalid email";
+  }
+
+  // All validations passed
+  return null;
+};
+
+/*  validateUser 
+1. Allow only the fields required for customer signup:
+   name, email, password.
+   This prevents users from sending unexpected fields like role: "admin".
+
+2. Check that reqBody exists, is an object, and is not an array.
+   This prevents errors when accessing or destructuring the request body.
+
+3. Extract all keys from reqBody using Object.keys().
+
+4. Use every() and includes() to ensure every submitted field
+   exists in the allowedFields array.
+
+5. Reject the request if any unexpected field is provided.
+
+6. Destructure name, email, and password from reqBody.
+
+7. Check that name is a non-empty string.
+
+8. Check that email is a non-empty string.
+
+9. Check that password is a non-empty string.
+
+10. Ensure the trimmed name contains at least 3 characters.
+
+11. Use validator.isEmail() to check whether the email
+    follows a valid email format.
+
+12. Use validator.isStrongPassword() to enforce password
+    strength requirements.
+
+13. Return an error message immediately when a check fails.
+
+14. Return null when all validation checks pass.
+
+*/

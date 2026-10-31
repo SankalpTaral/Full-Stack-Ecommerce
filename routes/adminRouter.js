@@ -9,6 +9,7 @@ import {
 
 import { userAuth } from "../middleware/userAuth.js";
 import adminAuth from "../middleware/adminAuth.js";
+import { updateOrderStatus } from "../controllers/order.controller.js";
 
 const adminRouter = express.Router();
 
@@ -33,5 +34,13 @@ adminRouter.delete(
   adminAuth,
   deleteProduct
 );
+
+
+adminRouter.patch(
+  "/order/:orderId/status",
+  userAuth,
+  adminAuth,
+  updateOrderStatus
+)
 
 export default adminRouter;
