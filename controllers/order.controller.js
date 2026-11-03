@@ -79,6 +79,24 @@ export const createOrder = async (req, res, next) => {
           message: "Invalid product quantity in cart.",
         });
       }
+
+      const product = allProducts.find(
+        (product) => product._id.toString() === item.productId.toString(),
+      );
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: "Product not found.",
+        });
+      }
+
+      if (product.stock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${product.name}`,
+        });
+      }
     }
 
     // orderItems you have an array of objects of each product with latest price
@@ -109,14 +127,15 @@ export const createOrder = async (req, res, next) => {
       shippingAddress: req.body.shippingAddress,
     });
 
-    // Step 6: Clear the cart only after order creation succeeds
-    cart.items = [];
-    await cart.save();
+    // // Step 6: Clear the cart only after order creation succeeds
+    // cart.items = [];
+    // await cart.save();
 
     // Step 7: Return the response
+
     return res.status(201).json({
       success: true,
-      message: "Order placed successfully",
+      message: "Order created. Proceed to payment.",
       data: {
         orderId: order._id,
         items: order.items,
@@ -487,7 +506,7 @@ export const updateOrderStatus = async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({
-      message : "Internal server error"
-    })
+      message: "Internal server error",
+    });
   }
 };

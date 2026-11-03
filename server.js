@@ -8,6 +8,7 @@ import cookieParser from "cookie-parser";
 import userRouter from './routes/userRouter.js';
 import productRouter from './routes/productRouter.js';
 import uploadRouter from "./routes/uploadRouter.js";
+import paymentRouter from './routes/paymentRouter.js';
 dotenv.config();
 
 
@@ -25,6 +26,7 @@ app.use("/admin", adminRouter);
 app.use("/",authRouter)
 app.use("/",userRouter)
 app.use("/products",productRouter)
+app.use("/payment",paymentRouter)
 app.use("/api",uploadRouter)
 
 const startServer = async () => {
