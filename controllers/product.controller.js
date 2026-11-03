@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Product from "../models/product.js";
+import uploadToCloudinary from "../utils/cloudinaryUpload.js";
 import {
   validateProductUpdate,
   validateProduct,
@@ -7,22 +8,45 @@ import {
 
 // Create a product
 const createProduct = async (req, res) => {
-  const { name, price, stock, category, description, image } = req.body;
+
+ 
+  const productInput = {
+  ...req.body,
+  name: req.body.name?.trim(),
+  description: req.body.description?.trim(),
+  category: req.body.category?.trim(),
+  price: Number(req.body.price),
+  stock: Number(req.body.stock),
+};
+const { name, price, stock, category, description } = productInput;
   try {
-    const error = validateProduct(req.body);
+    const error = validateProduct(productInput);
 
     if (error) {
       return res.status(400).json({
         message: error,
       });
     }
+
+    // validation before uploading
+    if (!req.file) {
+      return res.status(400).json({
+        message: "Product image is required",
+      });
+    }
+
+    const result = await uploadToCloudinary(req.file.buffer);
+
     const productData = {
       name,
       price,
       stock,
       category,
       description,
-      ...(image !== undefined && { image }),
+      image: {
+        url: result.secure_url,
+        publicId: result.public_id,
+      },
     };
 
     const product = await Product.create(productData);
@@ -32,6 +56,7 @@ const createProduct = async (req, res) => {
       product,
     });
   } catch (error) {
+    console.error("CREATE PRODUCT ERROR:", error);
     return res.status(500).json({
       message: "Internal server error",
     });
@@ -40,13 +65,11 @@ const createProduct = async (req, res) => {
 
 // Get all products
 
-
 const getAllProducts = async (req, res) => {
   try {
     // ==========================================
     // 1. NORMALIZE QUERY PARAMETER NAMES & VALUES
     // ==========================================
-
 
     console.log("req.query:", req.query);
 
@@ -57,52 +80,43 @@ const getAllProducts = async (req, res) => {
       // Example: Category -> category
       const normalizedKey = key.toLowerCase();
 
-        console.log("key:", key);
-  console.log("value:", value);
-  console.log("type:", typeof value);
+      console.log("key:", key);
+      console.log("value:", value);
+      console.log("type:", typeof value);
 
       // Prevent duplicate parameters after normalization.
       // Example: ?category=Books&Category=Electronics
-      
+
       if (Object.hasOwn(normalizedQuery, normalizedKey)) {
-  return res.status(400).json({
-    success: false,
-    message: "Duplicate query parameters",
-  });
-}
+        return res.status(400).json({
+          success: false,
+          message: "Duplicate query parameters",
+        });
+      }
       // Trim string values and lowercase category/sort values.
-  
-      console.log(typeof(value));
+
+      console.log(typeof value);
       if (typeof value === "string") {
-  const trimmedValue = value.trim();
+        const trimmedValue = value.trim();
 
-  if (normalizedKey === "category" || normalizedKey === "sort") {
-    normalizedQuery[normalizedKey] = trimmedValue.toLowerCase();
-  } else {
-    normalizedQuery[normalizedKey] = trimmedValue;
-  }
-} 
-else {
-  normalizedQuery[normalizedKey] = value;
-}
+        if (normalizedKey === "category" || normalizedKey === "sort") {
+          normalizedQuery[normalizedKey] = trimmedValue.toLowerCase();
+        } else {
+          normalizedQuery[normalizedKey] = trimmedValue;
+        }
+      } else {
+        normalizedQuery[normalizedKey] = value;
+      }
     }
- 
 
-   
     // ==========================================
     // 2. ALLOW ONLY APPROVED QUERY PARAMETERS
     // ==========================================
 
-    const allowedQueryParams = [
-      "page",
-      "limit",
-      "category",
-      "search",
-      "sort",
-    ];
+    const allowedQueryParams = ["page", "limit", "category", "search", "sort"];
 
     const hasInvalidParams = Object.keys(normalizedQuery).some(
-      (param) => !allowedQueryParams.includes(param)
+      (param) => !allowedQueryParams.includes(param),
     );
 
     if (hasInvalidParams) {
@@ -118,14 +132,10 @@ else {
 
     // Defaults: page 1, 10 products per page.
     const page =
-      normalizedQuery.page === undefined
-        ? 1
-        : Number(normalizedQuery.page);
+      normalizedQuery.page === undefined ? 1 : Number(normalizedQuery.page);
 
     const requestedLimit =
-      normalizedQuery.limit === undefined
-        ? 10
-        : Number(normalizedQuery.limit);
+      normalizedQuery.limit === undefined ? 10 : Number(normalizedQuery.limit);
 
     // Page and limit must be positive integers.
     // Reject values such as -1, 1.5, "abc", or 0.
@@ -164,10 +174,7 @@ else {
     const { category, search, sort } = normalizedQuery;
 
     // Reject non-string category values.
-    if (
-      category !== undefined &&
-      typeof category !== "string"
-    ) {
+    if (category !== undefined && typeof category !== "string") {
       return res.status(400).json({
         success: false,
         message: "Category must be a string",
@@ -175,10 +182,7 @@ else {
     }
 
     // Reject non-string search values.
-    if (
-      search !== undefined &&
-      typeof search !== "string"
-    ) {
+    if (search !== undefined && typeof search !== "string") {
       return res.status(400).json({
         success: false,
         message: "Search must be a string",
@@ -206,8 +210,7 @@ else {
 
     // Treat characters such as .* and + literally,
     // rather than allowing them to change the search pattern.
-    const escapeRegex = (value) =>
-      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     // ==========================================
     // 6. BUILD THE MONGODB FILTER
@@ -219,7 +222,7 @@ else {
     if (search !== undefined) {
       filter.name = {
         $regex: escapeRegex(search), // C++ if u type in regex + has  diff meaning so to avoid that we use escape search
-        // it treates + as normal character doesnt trigger regex pattern + 
+        // it treates + as normal character doesnt trigger regex pattern +
         $options: "i", // ignore letter casing for matching name in the db
       };
     }
@@ -311,7 +314,6 @@ else {
     });
   }
 };
-
 
 // Get a single product
 const getProduct = async (req, res) => {

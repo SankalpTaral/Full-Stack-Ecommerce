@@ -50,18 +50,10 @@ export const validateProduct = (reqBody) => {
     return "Product category is required";
   }
 
-  if (!image || typeof image !== "object" || Array.isArray(image)) {
-    return "Product image is required";
-  }
 
-  if (
-    typeof image.url !== "string" ||
-    image.url.trim().length === 0 ||
-    typeof image.publicId !== "string" ||
-    image.publicId.trim().length === 0
-  ) {
-    return "Image must contain a valid url and publicId";
-  }
+
+
+  
 
   return null;
 };

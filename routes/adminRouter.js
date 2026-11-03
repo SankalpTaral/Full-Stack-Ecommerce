@@ -1,5 +1,6 @@
 
 import express from "express";
+import upload from "../config/multer.js";
 
 import {
   createProduct,
@@ -18,6 +19,7 @@ adminRouter.post(
   "/createProduct",
   userAuth,
   adminAuth,
+   upload.single("image"), // multer will go and attach image 
   createProduct
 );
 
