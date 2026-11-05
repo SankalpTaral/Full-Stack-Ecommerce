@@ -1,155 +1,163 @@
+
 import Order from "../models/order.js";
-import Payment from "../models/payment.js";
+import razorpay from "../config/razorpay.js";
 import crypto from "crypto";
-import Product from "../models/product.js";
-import Cart from "../models/cart.js";
 
-export const createPayment = async (req, res) => {
-  const userId = req.user._id;
 
-  const { orderId } = req.body;
 
-  // Step 1 Check if orderId exist or no for the user is paying &&   Verify order ownership also
-
-  const order = await Order.findOne({
-    userId: userId,
-    _id: orderId,
-  });
-
-  if (!order) {
-    return res.status(404).json({
-      message: "Order not found ",
-    });
-  }
-
-  if (order.paymentStatus === "confirmed") {
-    return res.status(400).json({
-      message: "Payment is already done for this  ",
-    });
-  }
-
-  if (order.status === "cancelled") {
-    return res.status(400).json({
-      message: "Cannot pay for a cancelled order",
-    });
-  }
-
-  const transactionId = crypto.randomUUID();
-
-  const payment = await Payment.create({
-    orderId: order._id,
-    userId,
-    amount: order.totalAmount,
-    status: "pending",
-    paymentMethod: "mock",
-    transactionId,
-  });
-
-  return res.status(201).json({
-    message: "Payment initiated successfully",
-    payment: {
-      paymentId: payment._id,
-      transactionId: payment.transactionId,
-      amount: payment.amount,
-      status: payment.status,
-      paymentMethod: payment.paymentMethod,
-    },
-  });
-};
-
-export const processMockPayment = async (req, res) => {
+export const createRazorpayOrder = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { paymentId } = req.params;
-    const { outcome } = req.body;
+    // Step 1: Get MongoDB Order ID
+    const { orderId } = req.body;
 
-    // 1. Validate payment outcome
-    if (!["success", "failed"].includes(outcome)) {
+    if (!orderId) {
       return res.status(400).json({
-        message: "Invalid payment outcome",
+        success: false,
+        message: "Order ID is required",
       });
     }
 
-    // 2. Find payment belonging to logged-in user
-    const payment = await Payment.findOne({
-      _id: paymentId,
-      userId,
-    });
-
-    if (!payment) {
-      return res.status(404).json({
-        message: "Payment not found",
-      });
-    }
-
-    // 3. Prevent processing the same payment twice
-    if (payment.status !== "pending") {
-      return res.status(400).json({
-        message: "Payment has already been processed",
-      });
-    }
-
-    // 4. Find the associated order
+    // Step 2: Find the order belonging to the logged-in user
     const order = await Order.findOne({
-      _id: payment.orderId,
-      userId,
+      _id: orderId,
+      userId: req.user._id,
     });
 
     if (!order) {
       return res.status(404).json({
+        success: false,
         message: "Order not found",
       });
     }
 
-    // 5. Update payment status
-    payment.status = outcome;
-    await payment.save();
-
-    // 6. If payment succeeds, confirm the order
-    if (outcome === "success") {
-      order.paymentStatus = "confirmed";
-      order.status = "confirmed";
-
-      await order.save();
-
-      // Deduct product stock
-      for (const item of order.items) {
-        await Product.findByIdAndUpdate(item.productId, {
-          $inc: {
-            stock: -item.quantity,
-          },
-        });
-      }
-
-      // Clear user's cart
-      await Cart.findOneAndUpdate(
-        { userId },
-        {
-          $set: { items: [] },
-        },
-      );
+    // Step 3: Check payment status
+    if (order.paymentStatus !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment is not pending for this order",
+      });
     }
 
-    // 7. Send response
-    return res.status(200).json({
-      message: outcome === "success" ? "Payment successful" : "Payment failed",
+    // Step 4: Check if a Razorpay Order already exists
+    if (order.razorpayOrderId) {
+      return res.status(200).json({
+        success: true,
+        message: "Razorpay order already exists",
+        data: {
+          razorpayOrderId: order.razorpayOrderId,
+          amount: order.totalAmount * 100,
+          currency: "INR",
+          keyId: process.env.RAZORPAY_KEY_ID,
+          mongoOrderId: order._id,
+        },
+      });
+    }
 
-      payment: {
-        paymentId: payment._id,
-        transactionId: payment.transactionId,
-        amount: payment.amount,
-        status: payment.status,
-      },
+    // Step 5: Create Razorpay Order
+    const razorpayOrder = await razorpay.orders.create({
+      amount: Math.round(order.totalAmount * 100),
+      currency: "INR",
+      receipt: order._id.toString(),
+    });
 
-      order: {
-        orderId: order._id,
-        status: order.status,
-        paymentStatus: order.paymentStatus,
+    // Step 6: Save Razorpay Order ID in MongoDB
+    order.razorpayOrderId = razorpayOrder.id;
+    await order.save();
+
+    // Step 7: Send response
+    return res.status(201).json({
+      success: true,
+      message: "Razorpay order created successfully",
+      data: {
+        razorpayOrderId: razorpayOrder.id,
+        amount: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        keyId: process.env.RAZORPAY_KEY_ID,
+        mongoOrderId: order._id,
       },
     });
-  } catch (error) {
+  } catch (err) {
+    console.error("Razorpay order creation error:", err);
+
     return res.status(500).json({
-      message: error.message,
+      success: false,
+      message: "Failed to create Razorpay order",
     });
   }
+};
+export const verifyPayment = async (req, res) => {
+    try {
+        const {
+            razorpay_payment_id,
+            razorpay_order_id,
+            razorpay_signature
+        } = req.body;
+
+        // 1. Validate request data
+        if (
+            !razorpay_payment_id ||
+            !razorpay_order_id ||
+            !razorpay_signature
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Payment details are required"
+            });
+        }
+
+        // 2. Find the corresponding MongoDB order
+        const order = await Order.findOne({
+            razorpayOrderId: razorpay_order_id,
+            userId: req.user._id
+        });
+
+        if (!order) {
+            return res.status(404).json({
+                success: false,
+                message: "Order not found"
+            });
+        }
+
+        // 3. Generate signature on the backend
+        const generatedSignature = crypto
+            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+            .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+            .digest("hex");
+
+        // 4. Compare Razorpay signature with generated signature
+        const signatureBuffer = Buffer.from(razorpay_signature, "hex");
+        const generatedBuffer = Buffer.from(generatedSignature, "hex");
+
+        const isValid =
+            signatureBuffer.length === generatedBuffer.length &&
+            crypto.timingSafeEqual(signatureBuffer, generatedBuffer);
+
+        if (!isValid) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid payment signature"
+            });
+        }
+
+        // 5. Update order after successful verification
+        order.razorpayPaymentId = razorpay_payment_id;
+        order.paymentStatus = "confirmed";
+        order.status = "confirmed";
+
+        await order.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Payment verified successfully",
+            data: order
+        });
+
+    } catch (error) {
+        console.error("Payment verification error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Payment verification failed"
+        });
+    }
 };

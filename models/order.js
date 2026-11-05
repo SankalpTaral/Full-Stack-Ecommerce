@@ -44,6 +44,14 @@ const orderSchma = new Schema(
       enum: ["pending", "confirmed", "failed", "refunded"],
       default: "pending",
     },
+    razorpayOrderId: {
+      type: String,
+    },
+
+    razorpayPaymentId: {
+      type: String,
+    },
+
     shippingAddress: {
       street: {
         type: String,

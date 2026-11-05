@@ -15,8 +15,6 @@ export const createOrder = async (req, res, next) => {
         message: validate,
       });
     }
-    console.log("After step 1");
-
     // Step 1
     const userId = req.user._id;
 
@@ -61,9 +59,13 @@ export const createOrder = async (req, res, next) => {
       _id: { $in: allProductsId },
     });
 
-    // SO make sure allProducts exists
+    // MongoDB returns each product once, even if a cart has duplicate lines.
+    // Validate each cart line below rather than comparing result counts.
+    const productsById = new Map(
+      allProducts.map((product) => [product._id.toString(), product]),
+    );
 
-    if (allProducts.length !== cart.items.length) {
+    if (cart.items.some((item) => !productsById.has(item.productId.toString()))) {
       return res.status(400).json({
         success: false,
         message:
@@ -80,9 +82,7 @@ export const createOrder = async (req, res, next) => {
         });
       }
 
-      const product = allProducts.find(
-        (product) => product._id.toString() === item.productId.toString(),
-      );
+      const product = productsById.get(item.productId.toString());
 
       if (!product) {
         return res.status(404).json({
@@ -102,9 +102,7 @@ export const createOrder = async (req, res, next) => {
     // orderItems you have an array of objects of each product with latest price
 
     const orderItems = cart.items.map((item) => {
-      const product = allProducts.find(
-        (product) => product._id.toString() === item.productId.toString(),
-      );
+      const product = productsById.get(item.productId.toString());
 
       return {
         productId: product._id,
@@ -147,7 +145,9 @@ export const createOrder = async (req, res, next) => {
       },
     });
   } catch (err) {
+    console.error("Order creation error:", err);
     return res.status(500).json({
+      success: false,
       message: "Internal Server Error",
     });
   }

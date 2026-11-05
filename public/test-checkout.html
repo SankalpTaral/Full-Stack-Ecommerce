@@ -1,0 +1,167 @@
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Razorpay Test Checkout</title>
+
+    <!-- Razorpay Checkout SDK -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+
+<body>
+
+    <h1>Razorpay Payment Testing</h1>
+
+    <!-- Login -->
+    <h2>Login</h2>
+
+    <input
+        type="email"
+        id="email"
+        placeholder="Enter email"
+    >
+
+    <input
+        type="password"
+        id="password"
+        placeholder="Enter password"
+    >
+
+    <button id="loginBtn">Login</button>
+
+    <hr>
+
+    <!-- Payment -->
+    <h2>Payment</h2>
+
+    <button id="payBtn">Pay Now</button>
+
+    <script>
+
+        const loginBtn = document.getElementById("loginBtn");
+        const payBtn = document.getElementById("payBtn");
+
+        // STEP 1: LOGIN
+        loginBtn.addEventListener("click", async () => {
+
+            try {
+
+                const email = document.getElementById("email").value;
+                const password = document.getElementById("password").value;
+
+                const response = await fetch("/login", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        email,
+                        password
+                    })
+                });
+
+                const result = await response.json();
+
+                console.log("Login response:", result);
+
+                if (!response.ok) {
+                    alert(result.message || "Login failed");
+                    return;
+                }
+
+                alert("Login successful!");
+
+            } catch (error) {
+
+                console.error("Login error:", error);
+
+            }
+
+        });
+
+
+        // STEP 2: CREATE / FETCH RAZORPAY ORDER
+        payBtn.addEventListener("click", async () => {
+
+            try {
+
+                const response = await fetch("/api/payment/create-order", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    credentials: "include",
+                    body: JSON.stringify({
+                        orderId: "6aec441c2490a2fac24b4af6" // hardcoded 
+                    })
+                });
+
+                const result = await response.json();
+
+                console.log("Backend response:", result);
+
+                if (!response.ok || !result.success) {
+                    alert(result.message || "Unable to create payment");
+                    return;
+                }
+
+
+                // STEP 3: RAZORPAY CHECKOUT OPTIONS Razorpay steps 
+
+                const options = {
+
+                    key: result.data.keyId,
+
+                    amount: result.data.amount,
+
+                    currency: result.data.currency,
+
+                    name: "My E-commerce Store",
+
+                    description: "Test Product Purchase",
+
+                    order_id: result.data.razorpayOrderId,
+
+                    handler: function (paymentResponse) {
+
+                        console.log("Payment response:", paymentResponse);
+
+                        alert("Checkout returned a payment response. Backend verification is still required.");
+
+                    },
+
+                    theme: {
+                        color: "#3399cc"
+                    }
+
+                };
+
+
+                // STEP 4: INITIALIZE RAZORPAY
+
+                const rzp = new Razorpay(options);
+
+
+                // STEP 5: OPEN CHECKOUT
+
+                rzp.open();
+
+            } catch (error) {
+
+                console.error("Payment error:", error);
+
+                alert("Something went wrong!");
+
+            }
+
+        });
+
+    </script>
+
+</body>
+</html>

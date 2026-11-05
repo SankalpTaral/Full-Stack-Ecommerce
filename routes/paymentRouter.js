@@ -1,19 +1,16 @@
 import express from "express";
-import {
-    createPayment,
-    processMockPayment
-} from "../controllers/payment.controller.js";
-
 import { userAuth } from "../middleware/userAuth.js";
+import { createRazorpayOrder, verifyPayment } from "../controllers/payment.controller.js";
 
-const paymentRouter= express.Router();
-
-paymentRouter.post("/create", userAuth, createPayment);
+const paymentRouter = express.Router();
 
 paymentRouter.post(
-    "/:paymentId/process",
-    userAuth,
-    processMockPayment
+  "/create-order",
+  userAuth,
+  createRazorpayOrder
 );
+
+
+paymentRouter.post("/verify", userAuth, verifyPayment);
 
 export default paymentRouter;
