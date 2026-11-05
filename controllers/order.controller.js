@@ -4,6 +4,8 @@ import Order from "../models/order.js";
 import Product from "../models/product.js";
 import { BodyOfOrderValidator } from "../validators/orderValidator.js";
 
+
+// This is cart method creating ordering 
 export const createOrder = async (req, res, next) => {
   try {
     //Step 0
@@ -416,6 +418,91 @@ export const cancelOrderById = async (req, res) => {
   }
 };
 
+// This is direct buy now where user will send the productId and qty and ship address
+
+import mongoose from "mongoose";
+import Product from "../models/product.js";
+import Order from "../models/order.js";
+
+export const buyNow = async (req, res) => {
+  try {
+    const { productId, quantity, shippingAddress } = req.body;
+
+    // 1. Validate product ID
+    if (!mongoose.isValidObjectId(productId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+    }
+
+    // 2. Validate quantity
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Quantity must be a positive integer",
+      });
+    }
+
+    // 3. Validate shipping address
+    if (!shippingAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "Shipping address is required",
+      });
+    }
+
+    // 4. Fetch product from database
+    const product = await Product.findById(productId);
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    // 5. Check stock
+    if (product.stock < quantity) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient stock",
+      });
+    }
+
+    // 6. Calculate total using database price
+    const totalAmount = product.price * quantity;
+
+    // 7. Create order
+    const order = await Order.create({
+      userId: req.user._id,
+      items: [
+        {
+          productId: product._id,
+          price: product.price,
+          quantity,
+        },
+      ],
+      totalAmount,
+      shippingAddress,
+      status: "pending",
+      paymentStatus: "pending",
+    });
+
+    // 8. Send response
+    return res.status(201).json({
+      success: true,
+      message: "Buy Now order created successfully",
+      order,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 //Admin can perform this operations
 export const updateOrderStatus = async (req, res) => {
   try {
@@ -510,3 +597,5 @@ export const updateOrderStatus = async (req, res) => {
     });
   }
 };
+
+
