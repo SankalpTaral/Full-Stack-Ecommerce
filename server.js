@@ -1,5 +1,6 @@
 
 import express from 'express';
+import cors from "cors";
 import dotenv from 'dotenv';
 import { fileURLToPath } from "url";
 import connectDB from './config/database.js';
@@ -14,8 +15,15 @@ import path from "path";
 dotenv.config();
 
 
+
 const app = express();
 const PORT = process.env.PORT || 7777;
+
+
+app.use(cors({
+  origin: "http://localhost:5173",
+  credentials: true
+}));
 
 
 app.use(express.json())
@@ -25,6 +33,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(express.static(path.join(__dirname, "public")));
+
 
 
 

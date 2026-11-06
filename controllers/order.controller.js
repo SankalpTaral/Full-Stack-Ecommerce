@@ -420,9 +420,6 @@ export const cancelOrderById = async (req, res) => {
 
 // This is direct buy now where user will send the productId and qty and ship address
 
-import mongoose from "mongoose";
-import Product from "../models/product.js";
-import Order from "../models/order.js";
 
 export const buyNow = async (req, res) => {
   try {
