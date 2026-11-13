@@ -18,8 +18,8 @@ function Login() {
 
   const [activeIndex , setActiveIndex] = useState(0);
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("suhastaral@example.com");
+  const [password, setPassword] = useState("Suhas@123");
 
     const [emailError, setEmailError] = useState("");
     const [passwordError, setPasswordError] = useState("");
